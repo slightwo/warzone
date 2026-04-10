@@ -1,0 +1,13 @@
+{
+  "sl2": {
+    "username": "sl2",
+    "map_id": "cave",
+    "node_id": "node-b",
+    "x": 4,
+    "y": 20,
+    "hp": 120,
+    "treasures": 55,
+    "session_version": 14,
+    "updated_at": "2026-04-06T18:02:44.021320338+08:00"
+  }
+}
