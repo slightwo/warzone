@@ -1,0 +1,123 @@
+syntax = "proto3";
+package pb;
+option go_package = "battleworld/pb";
+
+message PlayerView {
+    string username = 1;
+    string map_id = 2;
+    int32 x = 3;
+    int32 y = 4;
+    int32 hp = 5;
+    int32 max_hp = 6;
+    int32 attack = 7;
+    int32 potions = 8;
+    int32 treasures = 9;
+    int32 kills = 10;
+    int32 deaths = 11;
+    int32 victories = 12;
+    bool alive = 13;
+    int32 respawn_in = 14;
+    string last_update = 15;
+}
+
+message NPCView {
+    string id = 1;
+    string name = 2;
+    int32 x = 3;
+    int32 y = 4;
+    int32 hp = 5;
+    int32 max_hp = 6;
+    int32 attack = 7;
+    bool alive = 8;
+}
+
+message TreasureView {
+    string id = 1;
+    string kind = 2;
+    int32 x = 3;
+    int32 y = 4;
+    int32 value = 5;
+}
+
+message MapBrief {
+    string id = 1;
+    string name = 2;
+    string node_id = 3;
+    int32 players = 4;
+    int32 npcs = 5;
+    int32 treasures = 6;
+    int64 version = 7;
+    bool primary = 8;
+    bool is_current = 9;
+    int64 checkpoint = 10;
+}
+
+message NodeView {
+    string id = 1;
+    string addr = 2;
+    bool healthy = 3;
+    repeated string primary_maps = 4;
+    repeated string replica_maps = 5;
+    string last_heartbeat = 6;
+}
+
+message MapView {
+    string id = 1;
+    string name = 2;
+    string node_id = 3;
+    int32 width = 4;
+    int32 height = 5;
+    repeated string terrain = 6;
+    repeated PlayerView players = 7;
+    repeated NPCView npcs = 8;
+    repeated TreasureView treasures = 9;
+    int64 version = 10;
+}
+
+message BossSite {
+    string map_id = 1;
+    int32 x = 2;
+    int32 y = 3;
+}
+
+message BossView {
+    string name = 1;
+    int32 hp = 2;
+    int32 max_hp = 3;
+    bool alive = 4;
+    string last_hit = 5;
+    int32 respawn_in = 6;
+    int32 attack_gap = 7;
+    repeated BossSite sites = 8;
+    int64 version = 9;
+}
+
+message WorldState {
+    PlayerView self = 1;
+    MapView map = 2;
+    repeated MapBrief maps = 3;
+    repeated NodeView nodes = 4;
+    BossView boss = 5;
+    repeated string events = 6;
+    int64 session_version = 7;
+}
+
+message Message {
+    string type = 1;
+    string action = 2;
+    string username = 3;
+    string password = 4;
+    string dir = 5;
+    string map_id = 6;
+    string node_id = 7;
+    string confirm = 8;
+    string item = 9;
+    string text = 10;
+    bool ok = 11;
+    string error = 12;
+    WorldState state = 13;
+}
+
+service GatewayService {
+    rpc GameStream(stream Message) returns (stream Message);
+}
