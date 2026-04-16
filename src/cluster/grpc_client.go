@@ -5,6 +5,7 @@ import (
 
 	"battleworld/pb"
 	"battleworld/protocol"
+	"battleworld/world"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -171,14 +172,14 @@ func (c *NodeGRPCClient) Checkpoint(ctx context.Context, mapID string) (protocol
 // Dummy implementations for lifecycle and map management methods
 // to satisfy NodeClient interface. In Stage 5, these will be true RPCs or ignored.
 
-func (c *NodeGRPCClient) Start() error                                                 { return nil }
-func (c *NodeGRPCClient) Stop() error                                                  { return nil }
-func (c *NodeGRPCClient) RemoveHostedMap(mapID string)                                 {}
-func (c *NodeGRPCClient) InstallPrimaryMap(cfg interface{})                            {} // Need to use proper typings if needed, actually it's world.MapConfig.
-func (c *NodeGRPCClient) RestorePrimaryMap(cfg interface{}, cp protocol.MapCheckpoint) {}
-func (c *NodeGRPCClient) BackgroundStep() []protocol.MapEvents                                  { return nil }
-func (c *NodeGRPCClient) StoreReplica(cp protocol.MapCheckpoint)                       {}
-func (c *NodeGRPCClient) Promote(mapID string, cfg interface{}) error                  { return nil }
-func (c *NodeGRPCClient) View() protocol.NodeView                                      { return protocol.NodeView{} }
-func (c *NodeGRPCClient) IsHealthy() bool                                              { return true }
-func (c *NodeGRPCClient) SetHealthy(healthy bool) bool                                 { return true }
+func (c *NodeGRPCClient) Start() error                                                     { return nil }
+func (c *NodeGRPCClient) Stop() error                                                      { return nil }
+func (c *NodeGRPCClient) RemoveHostedMap(mapID string)                                     {}
+func (c *NodeGRPCClient) InstallPrimaryMap(cfg world.MapConfig)                            {} // Need to use proper typings if needed, actually it's world.MapConfig.
+func (c *NodeGRPCClient) RestorePrimaryMap(cfg world.MapConfig, cp protocol.MapCheckpoint) {}
+func (c *NodeGRPCClient) BackgroundStep() []protocol.MapEvents                             { return nil }
+func (c *NodeGRPCClient) StoreReplica(cp protocol.MapCheckpoint)                           {}
+func (c *NodeGRPCClient) Promote(mapID string, cfg world.MapConfig) error                  { return nil }
+func (c *NodeGRPCClient) View() protocol.NodeView                                          { return protocol.NodeView{} }
+func (c *NodeGRPCClient) IsHealthy() bool                                                  { return true }
+func (c *NodeGRPCClient) SetHealthy(healthy bool) bool                                     { return true }

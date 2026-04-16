@@ -53,6 +53,7 @@ func main() {
 			break
 		}
 		fmt.Printf("%s进入失败：%v%s\n", colorRed, err, colorReset)
+		time.Sleep(700 * time.Millisecond)
 	}
 
 	restoreTTY, err := enterRawMode()

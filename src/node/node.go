@@ -36,35 +36,16 @@ func NewNodeService(id, addr string) *NodeService {
 }
 
 func (n *NodeService) Start() error {
-	n.mu.RLock()
+	n.mu.Lock()
 	if n.ln != nil {
 		n.mu.RUnlock()
 		return nil
 	}
-	n.mu.RUnlock()
 
-	ln, err := net.Listen("tcp", n.Addr)
-	if err != nil {
-		return err
-	}
-	n.mu.Lock()
-	n.ln = ln
 	n.lastHeartbeat = time.Now()
 	n.healthy = true
 	n.mu.Unlock()
 
-	go func() {
-		for {
-			raw, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				_, _ = fmt.Fprintf(c, "node=%s ts=%d\n", n.ID, time.Now().UnixNano())
-			}(raw)
-		}
-	}()
 	return nil
 }
 
@@ -72,13 +53,9 @@ func (n *NodeService) Stop() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if n.ln == nil {
-		return nil
-	}
-	err := n.ln.Close()
 	n.ln = nil
 	n.healthy = false
-	return err
+	return nil
 }
 
 func (n *NodeService) RemoveHostedMap(mapID string) {

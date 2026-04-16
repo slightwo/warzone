@@ -1,8 +1,6 @@
 package cluster
 
 import (
-	"battleworld/node"
-
 	"context"
 	"errors"
 	"fmt"
@@ -96,9 +94,25 @@ func NewCluster(store *storage.Store) (*Cluster, error) {
 	}
 	c.boss.Sites = c.buildBossSites()
 
-	c.nodes["node-a"] = node.NewNodeService("node-a", "127.0.0.1:9311")
-	c.nodes["node-b"] = node.NewNodeService("node-b", "127.0.0.1:9312")
-	c.nodes["node-c"] = node.NewNodeService("node-c", "127.0.0.1:9313")
+	// TODO: Stage 5 - Read topology from config or arguments instead of hardcoding.
+	// We establish gRPC clients to connect to remote node processes.
+	nodeA, err := NewNodeGRPCClient("node-a", "127.0.0.1:9311")
+	if err != nil {
+		return nil, err
+	}
+	c.nodes["node-a"] = nodeA
+
+	nodeB, err := NewNodeGRPCClient("node-b", "127.0.0.1:9312")
+	if err != nil {
+		return nil, err
+	}
+	c.nodes["node-b"] = nodeB
+
+	nodeC, err := NewNodeGRPCClient("node-c", "127.0.0.1:9313")
+	if err != nil {
+		return nil, err
+	}
+	c.nodes["node-c"] = nodeC
 
 	assignments := map[string]struct {
 		owner   string
