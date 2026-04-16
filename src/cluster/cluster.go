@@ -52,10 +52,37 @@ type BossState struct {
 	Contributors map[string]int
 }
 
+// NodeClient 代表向一个节点发起命令的客户端抽象，允许未来替换成网络版 (NodeGRPCClient)
+type NodeClient interface {
+	NodeID() string
+	Start() error
+	Stop() error
+	RemoveHostedMap(mapID string)
+	InstallPrimaryMap(cfg world.MapConfig)
+	RestorePrimaryMap(cfg world.MapConfig, cp protocol.MapCheckpoint)
+	AddPlayer(ctx context.Context, mapID string, profile *protocol.UserProfile) error
+	RemovePlayer(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error)
+	MovePlayer(ctx context.Context, mapID, username, dir string) (string, protocol.UserProfile, bool, error)
+	Attack(ctx context.Context, mapID, username string) (string, string, string, protocol.UserProfile, bool, error)
+	Heal(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error)
+	BuyItem(ctx context.Context, mapID, username, item string) (string, protocol.UserProfile, bool, error)
+	Profile(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error)
+	RewardPlayer(ctx context.Context, mapID, username string, treasureDelta, victoryDelta int) (protocol.UserProfile, bool, error)
+	Snapshot(ctx context.Context, mapID string) (protocol.MapView, error)
+	Counts(ctx context.Context, mapID string) (int, int, int, int64, error)
+	Checkpoint(ctx context.Context, mapID string) (protocol.MapCheckpoint, error)
+	BackgroundStep() []MapEvents
+	StoreReplica(cp protocol.MapCheckpoint)
+	Promote(mapID string, cfg world.MapConfig) error
+	View() protocol.NodeView
+	IsHealthy() bool
+	SetHealthy(healthy bool) bool
+}
+
 type Cluster struct {
 	mu       sync.RWMutex
 	store    *storage.Store
-	nodes    map[string]*NodeService
+	nodes    map[string]NodeClient
 	sessions map[string]*Session        //key==username
 	owners   map[string]string          //key==mapID
 	replicas map[string]string          //..
@@ -69,7 +96,7 @@ var studentTodoNotice sync.Map
 func NewCluster(store *storage.Store) (*Cluster, error) {
 	c := &Cluster{
 		store:    store,
-		nodes:    make(map[string]*NodeService),
+		nodes:    make(map[string]NodeClient),
 		sessions: make(map[string]*Session),
 		owners:   make(map[string]string),
 		replicas: make(map[string]string),
@@ -137,7 +164,7 @@ func (c *Cluster) Close() {
 
 	for mapID, nodeID := range owners {
 		owner := c.nodes[nodeID]
-		if !owner.healthy {
+		if !owner.IsHealthy() {
 			continue
 		}
 		CP, _ := owner.Checkpoint(context.Background(), mapID)
@@ -145,7 +172,7 @@ func (c *Cluster) Close() {
 		_ = c.store.SaveCheckpoint(CP)
 		replicaID := replicas[mapID]
 		replica := c.nodes[replicaID]
-		if replica.healthy && replica != nil {
+		if replica.IsHealthy() && replica != nil {
 			replica.StoreReplica(CP)
 		}
 	}
@@ -487,7 +514,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 	c.mu.Lock()
 	session, ok = c.sessions[username]
 	session.MapID = targetMap
-	session.NodeID = dst.ID
+	session.NodeID = dst.NodeID()
 	session.Version++
 	// c.mu.RLock()
 	// currentSession, _ := c.sessions[username]
@@ -522,7 +549,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	for k, v := range c.owners {
 		owners[k] = v
 	}
-	nodes := make(map[string]*NodeService, len(c.nodes))
+	nodes := make(map[string]NodeClient, len(c.nodes))
 	for k, v := range c.nodes {
 		nodes[k] = v
 	}
@@ -599,7 +626,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	return ws, nil
 }
 
-func (c *Cluster) sessionNode(username string) (*Session, *NodeService, error) {
+func (c *Cluster) sessionNode(username string) (*Session, NodeClient, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -744,7 +771,7 @@ func (c *Cluster) backgroundLoop() {
 				}
 			}
 			sort.Strings(nodeIDs)
-			nodes := make([]*NodeService, 0, len(nodeIDs))
+			nodes := make([]NodeClient, 0, len(nodeIDs))
 			for _, nodeID := range nodeIDs {
 				nodes = append(nodes, c.nodes[nodeID])
 			}
@@ -776,17 +803,17 @@ func (c *Cluster) heartbeatLoop() {
 				nodeIDs = append(nodeIDs, nodeID)
 			}
 			sort.Strings(nodeIDs)
-			nodes := make([]*NodeService, 0, len(nodeIDs))
+			nodes := make([]NodeClient, 0, len(nodeIDs))
 			for _, nodeID := range nodeIDs {
 				nodes = append(nodes, c.nodes[nodeID])
 			}
 			c.mu.RUnlock()
 
 			for _, node := range nodes {
-				healthy := ping(node.Addr)
+				healthy := ping(node.View().Addr)
 				wasHealthy := node.SetHealthy(healthy)
 				if wasHealthy && !healthy {
-					c.handleNodeFailure(node.ID)
+					c.handleNodeFailure(node.NodeID())
 				}
 			}
 		case <-c.stopCh:
@@ -817,7 +844,7 @@ func (c *Cluster) checkpointLoop() {
 
 			for mapID, nodeID := range owners {
 				owner := c.nodes[nodeID] //c.nodes是静态的，不存在被修改的风险
-				if !owner.healthy {
+				if !owner.IsHealthy() {
 					continue
 				}
 				CP, _ := owner.Checkpoint(context.Background(), mapID)
@@ -825,7 +852,7 @@ func (c *Cluster) checkpointLoop() {
 				_ = c.store.SaveCheckpoint(CP)
 				replicaID := replicas[mapID]
 				replica := c.nodes[replicaID]
-				if replica != nil && replica.healthy {
+				if replica != nil && replica.IsHealthy() {
 					replica.StoreReplica(CP)
 				}
 			}
@@ -1401,4 +1428,8 @@ func logStudentTODO(label, funcName, detail string) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "[%s] student 待实现函数被触发：%s，需要%s\n", label, funcName, detail)
+}
+
+func (n *NodeService) NodeID() string {
+	return n.ID
 }

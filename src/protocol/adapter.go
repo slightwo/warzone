@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"battleworld/pb"
+	"time"
 )
 
 func ToProtoPlayerView(p PlayerView) *pb.PlayerView {
@@ -380,4 +381,51 @@ func FromProtoUserProfile(u *pb.UserProfile) UserProfile {
 		Victories:    int(u.Victories),
 		Alive:        u.Alive,
 	}
+}
+
+func ToProtoMapCheckpoint(c MapCheckpoint) *pb.MapCheckpoint {
+	if c.MapID == "" {
+		return nil
+	}
+	cp := &pb.MapCheckpoint{
+		MapId:      c.MapID,
+		NodeId:     c.NodeID,
+		Version:    c.Version,
+		Terrain:    c.Terrain,
+		Checkpoint: c.Checkpoint.Format(time.RFC3339),
+	}
+	for _, p := range c.Players {
+		cp.Players = append(cp.Players, ToProtoPlayerView(p))
+	}
+	for _, n := range c.NPCs {
+		cp.Npcs = append(cp.Npcs, ToProtoNPCView(n))
+	}
+	for _, t := range c.Treasures {
+		cp.Treasures = append(cp.Treasures, ToProtoTreasureView(t))
+	}
+	return cp
+}
+
+func FromProtoMapCheckpoint(c *pb.MapCheckpoint) MapCheckpoint {
+	if c == nil {
+		return MapCheckpoint{}
+	}
+	t, _ := time.Parse(time.RFC3339, c.Checkpoint)
+	cp := MapCheckpoint{
+		MapID:      c.MapId,
+		NodeID:     c.NodeId,
+		Version:    c.Version,
+		Terrain:    c.Terrain,
+		Checkpoint: t,
+	}
+	for _, p := range c.Players {
+		cp.Players = append(cp.Players, FromProtoPlayerView(p))
+	}
+	for _, n := range c.Npcs {
+		cp.NPCs = append(cp.NPCs, FromProtoNPCView(n))
+	}
+	for _, t := range c.Treasures {
+		cp.Treasures = append(cp.Treasures, FromProtoTreasureView(t))
+	}
+	return cp
 }
