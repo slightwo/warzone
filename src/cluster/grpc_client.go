@@ -176,7 +176,7 @@ func (c *NodeGRPCClient) Stop() error                                           
 func (c *NodeGRPCClient) RemoveHostedMap(mapID string)                                 {}
 func (c *NodeGRPCClient) InstallPrimaryMap(cfg interface{})                            {} // Need to use proper typings if needed, actually it's world.MapConfig.
 func (c *NodeGRPCClient) RestorePrimaryMap(cfg interface{}, cp protocol.MapCheckpoint) {}
-func (c *NodeGRPCClient) BackgroundStep() []MapEvents                                  { return nil }
+func (c *NodeGRPCClient) BackgroundStep() []protocol.MapEvents                                  { return nil }
 func (c *NodeGRPCClient) StoreReplica(cp protocol.MapCheckpoint)                       {}
 func (c *NodeGRPCClient) Promote(mapID string, cfg interface{}) error                  { return nil }
 func (c *NodeGRPCClient) View() protocol.NodeView                                      { return protocol.NodeView{} }

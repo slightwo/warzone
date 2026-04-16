@@ -242,27 +242,27 @@ func (c *Conn) Close() error {
 }
 
 var worldStatePool = sync.Pool{
-New: func() interface{} {
-return &WorldState{}
-},
+	New: func() interface{} {
+		return &WorldState{}
+	},
 }
 
 func AllocWorldState() *WorldState {
-return worldStatePool.Get().(*WorldState)
+	return worldStatePool.Get().(*WorldState)
 }
 
 func FreeWorldState(ws *WorldState) {
-if ws == nil {
-return
-}
-// 帮助垃圾回收器清理切片内的对象引用
-ws.Maps = ws.Maps[:0]
-ws.Nodes = ws.Nodes[:0]
-ws.Events = ws.Events[:0]
-ws.Map.Terrain = ws.Map.Terrain[:0]
-ws.Map.Players = ws.Map.Players[:0]
-ws.Map.NPCs = ws.Map.NPCs[:0]
-ws.Map.Treasures = ws.Map.Treasures[:0]
-ws.Boss.Sites = ws.Boss.Sites[:0]
-worldStatePool.Put(ws)
+	if ws == nil {
+		return
+	}
+	// 帮助垃圾回收器清理切片内的对象引用
+	ws.Maps = ws.Maps[:0]
+	ws.Nodes = ws.Nodes[:0]
+	ws.Events = ws.Events[:0]
+	ws.Map.Terrain = ws.Map.Terrain[:0]
+	ws.Map.Players = ws.Map.Players[:0]
+	ws.Map.NPCs = ws.Map.NPCs[:0]
+	ws.Map.Treasures = ws.Map.Treasures[:0]
+	ws.Boss.Sites = ws.Boss.Sites[:0]
+	worldStatePool.Put(ws)
 }
