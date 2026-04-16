@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"sort"
 	"strings"
@@ -41,6 +40,7 @@ type NodeClient interface {
 	NodeID() string
 	Start() error
 	Stop() error
+	Ping(ctx context.Context) error
 	RemoveHostedMap(mapID string)
 	InstallPrimaryMap(cfg world.MapConfig)
 	RestorePrimaryMap(cfg world.MapConfig, cp protocol.MapCheckpoint)
@@ -67,7 +67,6 @@ type Cluster struct {
 	mu       sync.RWMutex
 	store    *storage.Store
 	nodes    map[string]NodeClient
-	sessions map[string]*Session        //key==username
 	owners   map[string]string          //key==mapID
 	replicas map[string]string          //..
 	configs  map[string]world.MapConfig //..
@@ -81,7 +80,6 @@ func NewCluster(store *storage.Store) (*Cluster, error) {
 	c := &Cluster{
 		store:    store,
 		nodes:    make(map[string]NodeClient),
-		sessions: make(map[string]*Session),
 		owners:   make(map[string]string),
 		replicas: make(map[string]string),
 		configs:  make(map[string]world.MapConfig),
@@ -94,46 +92,7 @@ func NewCluster(store *storage.Store) (*Cluster, error) {
 	}
 	c.boss.Sites = c.buildBossSites()
 
-	// TODO: Stage 5 - Read topology from config or arguments instead of hardcoding.
-	// We establish gRPC clients to connect to remote node processes.
-	nodeA, err := NewNodeGRPCClient("node-a", "127.0.0.1:9311")
-	if err != nil {
-		return nil, err
-	}
-	c.nodes["node-a"] = nodeA
-
-	nodeB, err := NewNodeGRPCClient("node-b", "127.0.0.1:9312")
-	if err != nil {
-		return nil, err
-	}
-	c.nodes["node-b"] = nodeB
-
-	nodeC, err := NewNodeGRPCClient("node-c", "127.0.0.1:9313")
-	if err != nil {
-		return nil, err
-	}
-	c.nodes["node-c"] = nodeC
-
-	assignments := map[string]struct {
-		owner   string
-		replica string
-	}{
-		"green": {owner: "node-a", replica: "node-c"},
-		"cave":  {owner: "node-b", replica: "node-c"},
-		"ruins": {owner: "node-a", replica: "node-b"},
-	}
-
-	for mapID, placement := range assignments {
-		cfg := c.configs[mapID]
-		c.owners[mapID] = placement.owner
-		c.replicas[mapID] = placement.replica
-		c.nodes[placement.owner].InstallPrimaryMap(cfg)
-		if cp, ok := store.LoadCheckpoint(mapID); ok {
-			c.nodes[placement.owner].RestorePrimaryMap(cfg, *cp)
-			c.nodes[placement.replica].StoreReplica(*cp)
-		}
-	}
-
+	// 拓扑结构不再硬编码，而是由 discoveryLoop 动态从 Redis 发现节点并接管
 	return c, nil
 }
 
@@ -143,6 +102,7 @@ func (c *Cluster) Start() error {
 			return err
 		}
 	}
+	go c.discoveryLoop()
 	go c.backgroundLoop()
 	go c.heartbeatLoop()
 	go c.checkpointLoop()
@@ -172,7 +132,7 @@ func (c *Cluster) Close() {
 		_ = c.store.SaveCheckpoint(CP)
 		replicaID := replicas[mapID]
 		replica := c.nodes[replicaID]
-		if replica.IsHealthy() && replica != nil {
+		if replica != nil && replica.IsHealthy() {
 			replica.StoreReplica(CP)
 		}
 	}
@@ -223,7 +183,7 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 	}
 
 	c.mu.Lock()
-	if _, ok := c.sessions[username]; ok {
+	if _, ok := c.store.LoadGlobalSession(username); ok {
 		c.mu.Unlock()
 		return nil, fmt.Errorf("用户 %q 已经在线", username)
 	}
@@ -244,7 +204,7 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 	}
 
 	c.mu.Lock()
-	session := &Session{
+	session := storage.GlobalSession{
 		Username: username,
 		MapID:    mapID,
 		NodeID:   ownerID,
@@ -254,7 +214,7 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 			fmt.Sprintf("当前地图 %s 由 %s 承载", mapID, ownerID),
 		},
 	}
-	c.sessions[username] = session
+	_ = c.store.SaveGlobalSession(session)
 	c.mu.Unlock()
 
 	_ = c.persistSessionState(username)
@@ -263,12 +223,12 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 
 func (c *Cluster) Logout(username string) error {
 	c.mu.Lock()
-	session, ok := c.sessions[username]
+	session, ok := c.store.LoadGlobalSession(username)
 	if !ok {
 		c.mu.Unlock()
 		return nil
 	}
-	delete(c.sessions, username)
+	_ = c.store.DeleteGlobalSession(username)
 	c.mu.Unlock()
 
 	node := c.nodes[session.NodeID]
@@ -431,8 +391,11 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 		//奖励参与者
 		for name, con := range bossTmp.Contributors {
 			c.mu.RLock()
-			session := c.sessions[name]
+			session, ok := c.store.LoadGlobalSession(name)
 			c.mu.RUnlock()
+			if !ok {
+				continue
+			}
 			profile, ok, err := node.RewardPlayer(context.Background(), session.MapID, name, con, con) //,name,contri,contri)
 			if err != nil {
 				fmt.Printf("[ERROR] RPC RewardPlayer 异常: %v\n", err)
@@ -512,17 +475,22 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 	profile.LastMap = targetMap
 	profile.LastNode = dst_node
 	c.mu.Lock()
-	session, ok = c.sessions[username]
-	session.MapID = targetMap
-	session.NodeID = dst.NodeID()
-	session.Version++
+	session, ok = c.store.LoadGlobalSession(username)
+	if ok && session != nil {
+		session.MapID = targetMap
+		session.NodeID = dst.NodeID()
+		session.Version++
+		_ = c.store.SaveGlobalSession(*session)
+	}
 	// c.mu.RLock()
-	// currentSession, _ := c.sessions[username]
+	// currentSession, _ := c.store.LoadGlobalSession(username)
 	// fmt.Printf("[DEBUG] Session 更新后: MapID=%s, NodeID=%s, Version=%d\n",
 	// 	currentSession.MapID, currentSession.NodeID, currentSession.Version)
 	c.mu.Unlock()
 
-	c.pushEventLocked(session, fmt.Sprintf("切换到地图 %s", targetMap))
+	if ok && session != nil {
+		c.pushEventLocked(session, fmt.Sprintf("切换到地图 %s", targetMap))
+	}
 	_ = c.store.SaveProfile(profile)
 	_ = c.persistSessionState(username)
 
@@ -536,7 +504,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 
 func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	c.mu.RLock()
-	session, ok := c.sessions[username]
+	session, ok := c.store.LoadGlobalSession(username)
 	if !ok {
 		c.mu.RUnlock()
 		return nil, fmt.Errorf("用户 %q 当前不在线", username)
@@ -626,11 +594,11 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	return ws, nil
 }
 
-func (c *Cluster) sessionNode(username string) (*Session, NodeClient, error) {
+func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, NodeClient, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	session, ok := c.sessions[username]
+	session, ok := c.store.LoadGlobalSession(username)
 	if !ok {
 		return nil, nil, fmt.Errorf("用户 %q 当前不在线", username)
 	}
@@ -650,19 +618,20 @@ func (c *Cluster) pushEvent(username, event string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	session, ok := c.sessions[username]
+	session, ok := c.store.LoadGlobalSession(username)
 	if !ok {
 		return
 	}
 	c.pushEventLocked(session, event)
 }
 
-func (c *Cluster) pushEventLocked(session *Session, event string) {
+func (c *Cluster) pushEventLocked(session *storage.GlobalSession, event string) {
 	session.Events = append(session.Events, event)
 	if len(session.Events) > 8 {
 		session.Events = session.Events[len(session.Events)-8:]
 	}
 	session.Version++
+	_ = c.store.SaveGlobalSession(*session)
 }
 
 func (c *Cluster) broadcastGlobalEvent(event string) {
@@ -676,8 +645,9 @@ func (c *Cluster) broadcastGlobalEvent(event string) {
 }
 
 func (c *Cluster) broadcastGlobalEventLocked(event string) {
-	for _, session := range c.sessions {
-		c.pushEventLocked(session, event)
+	sessions, _ := c.store.GetAllGlobalSessions()
+	for _, session := range sessions {
+		c.pushEventLocked(&session, event)
 	}
 }
 
@@ -689,9 +659,10 @@ func (c *Cluster) broadcastMapEvent(mapID, event string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, session := range c.sessions {
+	sessions, _ := c.store.GetAllGlobalSessions()
+	for _, session := range sessions {
 		if session.MapID == mapID {
-			c.pushEventLocked(session, event)
+			c.pushEventLocked(&session, event)
 		}
 	}
 }
@@ -702,7 +673,7 @@ func (c *Cluster) persistSessionState(username string) error {
 	// 建议区分：
 	//首先从session获取必要的信息
 	c.mu.RLock()
-	session, ok := c.sessions[username]
+	session, ok := c.store.LoadGlobalSession(username)
 
 	if !ok {
 		c.mu.RUnlock()
@@ -754,6 +725,56 @@ func (c *Cluster) respawnBossAfterCooldown() {
 
 	c.boss = newBossState()
 	c.broadcastGlobalEventLocked(fmt.Sprintf("世界首领【%s】重新降临，所有服务器均可参与讨伐", c.boss.Name))
+}
+
+func (c *Cluster) discoveryLoop() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			activeNodes, err := c.store.GetActiveNodes()
+			if err != nil {
+				continue
+			}
+
+			c.mu.Lock()
+			for _, info := range activeNodes {
+				// 如果是新节点，则建立链接并初始化地图分布
+				if _, ok := c.nodes[info.ID]; !ok {
+					client, err := NewNodeGRPCClient(info.ID, info.Addr)
+					if err == nil {
+						c.nodes[info.ID] = client
+
+						// 将该节点宣称自己负责的地图加入 owners 列表
+						for _, mapID := range info.Maps {
+							cfg := c.configs[mapID]
+
+							// 只处理存在的合法地图类型
+							if cfg.ID != "" {
+								c.owners[mapID] = info.ID
+								fmt.Printf("[Cluster 节点发现] 新节点上线: %s, 负责接管地图: %s\n", info.ID, mapID)
+
+								// 把最新的全服快照推送给它
+								if cp, ok := c.store.LoadCheckpoint(mapID); ok {
+									client.RestorePrimaryMap(cfg, *cp)
+								} else {
+									client.InstallPrimaryMap(cfg)
+								}
+							}
+						}
+						// 调用它的 Start，为了符合 NodeClient 接口规范
+						_ = client.Start()
+					}
+				}
+			}
+			c.mu.Unlock()
+
+		case <-c.stopCh:
+			return
+		}
+	}
 }
 
 func (c *Cluster) backgroundLoop() {
@@ -809,13 +830,25 @@ func (c *Cluster) heartbeatLoop() {
 			}
 			c.mu.RUnlock()
 
+			var wg sync.WaitGroup
 			for _, node := range nodes {
-				healthy := ping(node.View().Addr)
-				wasHealthy := node.SetHealthy(healthy)
-				if wasHealthy && !healthy {
-					c.handleNodeFailure(node.NodeID())
-				}
+				wg.Add(1)
+				go func(n NodeClient) {
+					defer wg.Done()
+					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+					defer cancel()
+
+					// 使用原生的 gRPC Ping 测试应用层健康程度，而不是简单测试 TCP 端口
+					err := n.Ping(ctx)
+					healthy := err == nil
+
+					wasHealthy := n.SetHealthy(healthy)
+					if wasHealthy && !healthy {
+						c.handleNodeFailure(n.NodeID())
+					}
+				}(node)
 			}
+			wg.Wait()
 		case <-c.stopCh:
 			return
 		}
@@ -861,14 +894,14 @@ func (c *Cluster) checkpointLoop() {
 			return
 		}
 	}
-	// TODO(Lab3-4):
+
 	// 这里要实现“主节点定期生成检查点，并复制给副本节点”。
 	// 至少要包含：
 	// 1. 从 owners 找到每张地图当前主节点。
 	// 2. 抓取主节点地图快照。
 	// 3. 同时写入本地检查点存储与 replica 节点内存。
 	// 4. 跳过故障节点，避免把坏状态继续扩散。
-	//logStudentTODO("Lab3-4", "cluster.checkpointLoop", "完成主节点检查点复制与副本同步")
+
 }
 
 func (c *Cluster) flushLoop() {
@@ -879,9 +912,10 @@ func (c *Cluster) flushLoop() {
 		select {
 		case <-ticker.C:
 			c.mu.RLock()
-			usernames := make([]string, 0, len(c.sessions))
-			for username := range c.sessions {
-				usernames = append(usernames, username)
+			sessions, _ := c.store.GetAllGlobalSessions()
+			usernames := make([]string, 0, len(sessions))
+			for _, s := range sessions {
+				usernames = append(usernames, s.Username)
 			}
 			c.mu.RUnlock()
 
@@ -922,9 +956,11 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 		c.owners[mapID] = replicasID
 
 	}
-	for _, session := range c.sessions {
+	sessions, _ := c.store.GetAllGlobalSessions()
+	for _, session := range sessions {
 		if session.NodeID == nodeID {
 			session.NodeID = c.owners[session.MapID]
+			c.store.SaveGlobalSession(session)
 		}
 	}
 	c.mu.Unlock()
@@ -1096,15 +1132,6 @@ func (b *BossState) viewLocked() protocol.BossView {
 		Sites:     append([]protocol.BossSite(nil), b.Sites...),
 		Version:   b.Version,
 	}
-}
-
-func ping(addr string) bool {
-	conn, err := net.DialTimeout("tcp", addr, 250*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
 }
 
 func max(a, b int) int {

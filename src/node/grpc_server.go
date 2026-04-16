@@ -147,3 +147,17 @@ func (s *NodeGRPCServer) Checkpoint(ctx context.Context, req *pb.CheckpointReq) 
 		Checkpoint: protocol.ToProtoMapCheckpoint(cp),
 	}, nil
 }
+
+func (s *NodeGRPCServer) BackgroundStep(ctx context.Context, req *pb.BackgroundStepReq) (*pb.BackgroundStepResp, error) {
+	events := s.svc.BackgroundStep()
+	resp := make([]*pb.MapEvents, 0, len(events))
+	for _, e := range events {
+		resp = append(resp, &pb.MapEvents{
+			MapId:  e.MapID,
+			Events: e.Events,
+		})
+	}
+	return &pb.BackgroundStepResp{
+		Events: resp,
+	}, nil
+}

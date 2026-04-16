@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v3.6.1
-// source: pb/battle.proto
+// source: battle.proto
 
 package pb
 
@@ -111,22 +111,23 @@ var GatewayService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "pb/battle.proto",
+	Metadata: "battle.proto",
 }
 
 const (
-	NodeService_Ping_FullMethodName         = "/pb.NodeService/Ping"
-	NodeService_AddPlayer_FullMethodName    = "/pb.NodeService/AddPlayer"
-	NodeService_RemovePlayer_FullMethodName = "/pb.NodeService/RemovePlayer"
-	NodeService_MovePlayer_FullMethodName   = "/pb.NodeService/MovePlayer"
-	NodeService_Attack_FullMethodName       = "/pb.NodeService/Attack"
-	NodeService_Heal_FullMethodName         = "/pb.NodeService/Heal"
-	NodeService_BuyItem_FullMethodName      = "/pb.NodeService/BuyItem"
-	NodeService_Profile_FullMethodName      = "/pb.NodeService/Profile"
-	NodeService_RewardPlayer_FullMethodName = "/pb.NodeService/RewardPlayer"
-	NodeService_Snapshot_FullMethodName     = "/pb.NodeService/Snapshot"
-	NodeService_Counts_FullMethodName       = "/pb.NodeService/Counts"
-	NodeService_Checkpoint_FullMethodName   = "/pb.NodeService/Checkpoint"
+	NodeService_Ping_FullMethodName           = "/pb.NodeService/Ping"
+	NodeService_AddPlayer_FullMethodName      = "/pb.NodeService/AddPlayer"
+	NodeService_RemovePlayer_FullMethodName   = "/pb.NodeService/RemovePlayer"
+	NodeService_MovePlayer_FullMethodName     = "/pb.NodeService/MovePlayer"
+	NodeService_Attack_FullMethodName         = "/pb.NodeService/Attack"
+	NodeService_Heal_FullMethodName           = "/pb.NodeService/Heal"
+	NodeService_BuyItem_FullMethodName        = "/pb.NodeService/BuyItem"
+	NodeService_Profile_FullMethodName        = "/pb.NodeService/Profile"
+	NodeService_RewardPlayer_FullMethodName   = "/pb.NodeService/RewardPlayer"
+	NodeService_Snapshot_FullMethodName       = "/pb.NodeService/Snapshot"
+	NodeService_Counts_FullMethodName         = "/pb.NodeService/Counts"
+	NodeService_Checkpoint_FullMethodName     = "/pb.NodeService/Checkpoint"
+	NodeService_BackgroundStep_FullMethodName = "/pb.NodeService/BackgroundStep"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -145,6 +146,7 @@ type NodeServiceClient interface {
 	Snapshot(ctx context.Context, in *SnapshotReq, opts ...grpc.CallOption) (*SnapshotResp, error)
 	Counts(ctx context.Context, in *CountsReq, opts ...grpc.CallOption) (*CountsResp, error)
 	Checkpoint(ctx context.Context, in *CheckpointReq, opts ...grpc.CallOption) (*CheckpointResp, error)
+	BackgroundStep(ctx context.Context, in *BackgroundStepReq, opts ...grpc.CallOption) (*BackgroundStepResp, error)
 }
 
 type nodeServiceClient struct {
@@ -275,6 +277,16 @@ func (c *nodeServiceClient) Checkpoint(ctx context.Context, in *CheckpointReq, o
 	return out, nil
 }
 
+func (c *nodeServiceClient) BackgroundStep(ctx context.Context, in *BackgroundStepReq, opts ...grpc.CallOption) (*BackgroundStepResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BackgroundStepResp)
+	err := c.cc.Invoke(ctx, NodeService_BackgroundStep_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServiceServer is the server API for NodeService service.
 // All implementations must embed UnimplementedNodeServiceServer
 // for forward compatibility.
@@ -291,6 +303,7 @@ type NodeServiceServer interface {
 	Snapshot(context.Context, *SnapshotReq) (*SnapshotResp, error)
 	Counts(context.Context, *CountsReq) (*CountsResp, error)
 	Checkpoint(context.Context, *CheckpointReq) (*CheckpointResp, error)
+	BackgroundStep(context.Context, *BackgroundStepReq) (*BackgroundStepResp, error)
 	mustEmbedUnimplementedNodeServiceServer()
 }
 
@@ -336,6 +349,9 @@ func (UnimplementedNodeServiceServer) Counts(context.Context, *CountsReq) (*Coun
 }
 func (UnimplementedNodeServiceServer) Checkpoint(context.Context, *CheckpointReq) (*CheckpointResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method Checkpoint not implemented")
+}
+func (UnimplementedNodeServiceServer) BackgroundStep(context.Context, *BackgroundStepReq) (*BackgroundStepResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method BackgroundStep not implemented")
 }
 func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
 func (UnimplementedNodeServiceServer) testEmbeddedByValue()                     {}
@@ -574,6 +590,24 @@ func _NodeService_Checkpoint_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NodeService_BackgroundStep_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BackgroundStepReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).BackgroundStep(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_BackgroundStep_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).BackgroundStep(ctx, req.(*BackgroundStepReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NodeService_ServiceDesc is the grpc.ServiceDesc for NodeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -629,7 +663,11 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Checkpoint",
 			Handler:    _NodeService_Checkpoint_Handler,
 		},
+		{
+			MethodName: "BackgroundStep",
+			Handler:    _NodeService_BackgroundStep_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "pb/battle.proto",
+	Metadata: "battle.proto",
 }

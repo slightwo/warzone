@@ -205,6 +205,18 @@ service NodeService {
     rpc Snapshot(SnapshotReq) returns (SnapshotResp);
     rpc Counts(CountsReq) returns (CountsResp);
     rpc Checkpoint(CheckpointReq) returns (CheckpointResp);
+    rpc BackgroundStep(BackgroundStepReq) returns (BackgroundStepResp);
+}
+
+message BackgroundStepReq {}
+
+message BackgroundStepResp {
+    repeated MapEvents events = 1;
+}
+
+message MapEvents {
+    string map_id = 1;
+    repeated string events = 2;
 }
 
 message HealReq {

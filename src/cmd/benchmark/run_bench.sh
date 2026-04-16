@@ -8,14 +8,14 @@ DURATION=${2:-30}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 cd "$SCRIPT_DIR/../.." || exit 1
 
-cleanup_ports() {
-    echo "清理相关端口 (9310-9313)..."
-    # 查找占用 9310 到 9313 端口的进程并杀掉
-    lsof -i :9310-9313 -t | xargs -r kill -9
-}
+# cleanup_ports() {
+#     echo "清理相关端口 (9310-9313)..."
+#     # 查找占用 9310 到 9313 端口的进程并杀掉
+#     lsof -i :9310-9313 -t | xargs -r kill -9
+# }
 
-# 压测前先清理一下可能残留的端口占用
-cleanup_ports
+# # 压测前先清理一下可能残留的端口占用
+# cleanup_ports
 
 echo "==================================="
 echo "编译游戏服务端..."
@@ -43,7 +43,7 @@ kill -2 $SERVER_PID
 wait $SERVER_PID
 echo "服务端已关闭..."
 
-# 兜底清理残留端口
-cleanup_ports
+# # 兜底清理残留端口
+# cleanup_ports
 
 echo "压测脚本执行完毕。"

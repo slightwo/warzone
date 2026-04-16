@@ -158,6 +158,12 @@ func (c *NodeGRPCClient) Counts(ctx context.Context, mapID string) (int, int, in
 	return int(resp.Players), int(resp.Npcs), int(resp.Treasures), resp.Version, nil
 }
 
+func (c *NodeGRPCClient) Ping(ctx context.Context) error {
+	req := &pb.PingReq{}
+	_, err := c.client.Ping(ctx, req)
+	return err
+}
+
 func (c *NodeGRPCClient) Checkpoint(ctx context.Context, mapID string) (protocol.MapCheckpoint, error) {
 	req := &pb.CheckpointReq{
 		MapId: mapID,
@@ -177,7 +183,21 @@ func (c *NodeGRPCClient) Stop() error                                           
 func (c *NodeGRPCClient) RemoveHostedMap(mapID string)                                     {}
 func (c *NodeGRPCClient) InstallPrimaryMap(cfg world.MapConfig)                            {} // Need to use proper typings if needed, actually it's world.MapConfig.
 func (c *NodeGRPCClient) RestorePrimaryMap(cfg world.MapConfig, cp protocol.MapCheckpoint) {}
-func (c *NodeGRPCClient) BackgroundStep() []protocol.MapEvents                             { return nil }
+func (c *NodeGRPCClient) BackgroundStep() []protocol.MapEvents {
+	resp, err := c.client.BackgroundStep(context.Background(), &pb.BackgroundStepReq{})
+	if err != nil || resp == nil {
+		return nil
+	}
+	res := make([]protocol.MapEvents, 0, len(resp.Events))
+	for _, e := range resp.Events {
+		res = append(res, protocol.MapEvents{
+			MapID:  e.MapId,
+			Events: append([]string(nil), e.Events...),
+		})
+	}
+	return res
+}
+
 func (c *NodeGRPCClient) StoreReplica(cp protocol.MapCheckpoint)                           {}
 func (c *NodeGRPCClient) Promote(mapID string, cfg world.MapConfig) error                  { return nil }
 func (c *NodeGRPCClient) View() protocol.NodeView                                          { return protocol.NodeView{} }

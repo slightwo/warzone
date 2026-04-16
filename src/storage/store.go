@@ -250,3 +250,83 @@ func hashPassword(password string) string {
 	sum := sha256.Sum256([]byte(password))
 	return hex.EncodeToString(sum[:])
 }
+
+type NodeRegistryInfo struct {
+	ID   string   `json:"id"`
+	Addr string   `json:"addr"`
+	Maps []string `json:"maps"`
+}
+
+func (s *Store) RegisterNode(info NodeRegistryInfo, ttl time.Duration) error {
+	data, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	return s.rdb.Set(s.ctx, "battle:node:registry:"+info.ID, data, ttl).Err()
+}
+
+func (s *Store) GetActiveNodes() ([]NodeRegistryInfo, error) {
+	keys, err := s.rdb.Keys(s.ctx, "battle:node:registry:*").Result()
+	if err != nil {
+		return nil, err
+	}
+	var nodes []NodeRegistryInfo
+	for _, k := range keys {
+		data, err := s.rdb.Get(s.ctx, k).Bytes()
+		if err == nil {
+			var info NodeRegistryInfo
+			if json.Unmarshal(data, &info) == nil {
+				nodes = append(nodes, info)
+			}
+		}
+	}
+	return nodes, nil
+}
+
+type GlobalSession struct {
+	Username string   `json:"username"`
+	MapID    string   `json:"map_id"`
+	NodeID   string   `json:"node_id"`
+	Events   []string `json:"events"`
+	Version  int64    `json:"version"`
+}
+
+func (s *Store) SaveGlobalSession(session GlobalSession) error {
+	data, err := json.Marshal(session)
+	if err != nil {
+		return err
+	}
+	// session:username
+	return s.rdb.HSet(s.ctx, "global_sessions", session.Username, data).Err()
+}
+
+func (s *Store) LoadGlobalSession(username string) (*GlobalSession, bool) {
+	data, err := s.rdb.HGet(s.ctx, "global_sessions", username).Bytes()
+	if err != nil {
+		return nil, false
+	}
+	var gs GlobalSession
+	if err := json.Unmarshal(data, &gs); err != nil {
+		return nil, false
+	}
+	return &gs, true
+}
+
+func (s *Store) DeleteGlobalSession(username string) error {
+	return s.rdb.HDel(s.ctx, "global_sessions", username).Err()
+}
+
+func (s *Store) GetAllGlobalSessions() ([]GlobalSession, error) {
+	result, err := s.rdb.HGetAll(s.ctx, "global_sessions").Result()
+	if err != nil {
+		return nil, err
+	}
+	var sessions []GlobalSession
+	for _, raw := range result {
+		var gs GlobalSession
+		if json.Unmarshal([]byte(raw), &gs) == nil {
+			sessions = append(sessions, gs)
+		}
+	}
+	return sessions, nil
+}

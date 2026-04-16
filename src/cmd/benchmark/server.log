@@ -1,1 +1,4 @@
 gRPC 网关已启动：127.0.0.1:9310
+[Cluster 节点发现] 新节点上线: node-b, 负责接管地图: cave
+[Cluster 节点发现] 新节点上线: node-b, 负责接管地图: ruins
+[Cluster 节点发现] 新节点上线: node-a, 负责接管地图: green
