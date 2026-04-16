@@ -121,3 +121,171 @@ message Message {
 service GatewayService {
     rpc GameStream(stream Message) returns (stream Message);
 }
+
+message UserProfile {
+    string username = 1;
+    string password_hash = 2;
+    string last_map = 3;
+    string last_node = 4;
+    int32 x = 5;
+    int32 y = 6;
+    int32 hp = 7;
+    int32 max_hp = 8;
+    int32 attack = 9;
+    int32 potions = 10;
+    int32 treasures = 11;
+    int32 kills = 12;
+    int32 deaths = 13;
+    int32 victories = 14;
+    bool alive = 15;
+}
+
+message AddPlayerReq {
+    string map_id = 1;
+    UserProfile profile = 2;
+}
+
+message AddPlayerResp {
+    bool ok = 1;
+}
+
+message RemovePlayerReq {
+    string map_id = 1;
+    string username = 2;
+}
+
+message RemovePlayerResp {
+    UserProfile profile = 1;
+    bool ok = 2;
+}
+
+message MovePlayerReq {
+    string map_id = 1;
+    string username = 2;
+    string dir = 3;
+}
+
+message MovePlayerResp {
+    string text = 1;
+    UserProfile profile = 2;
+    bool ok = 3;
+}
+
+message AttackReq {
+    string map_id = 1;
+    string username = 2;
+}
+
+message AttackResp {
+    string log = 1;
+    string b_log = 2;
+    string gm_log = 3;
+    UserProfile profile = 4;
+    bool ok = 5;
+}
+
+message PingReq {
+    string node_id = 1;
+}
+
+message PingResp {
+    int64 ts = 1;
+}
+
+service NodeService {
+    rpc Ping(PingReq) returns (PingResp);
+    rpc AddPlayer(AddPlayerReq) returns (AddPlayerResp);
+    rpc RemovePlayer(RemovePlayerReq) returns (RemovePlayerResp);
+    rpc MovePlayer(MovePlayerReq) returns (MovePlayerResp);
+    rpc Attack(AttackReq) returns (AttackResp);
+    rpc Heal(HealReq) returns (HealResp);
+    rpc BuyItem(BuyItemReq) returns (BuyItemResp);
+    rpc Profile(ProfileReq) returns (ProfileResp);
+    rpc RewardPlayer(RewardPlayerReq) returns (RewardPlayerResp);
+    rpc Snapshot(SnapshotReq) returns (SnapshotResp);
+    rpc Counts(CountsReq) returns (CountsResp);
+    rpc Checkpoint(CheckpointReq) returns (CheckpointResp);
+}
+
+message HealReq {
+    string map_id = 1;
+    string username = 2;
+}
+
+message HealResp {
+    string text = 1;
+    UserProfile profile = 2;
+    bool ok = 3;
+}
+
+message BuyItemReq {
+    string map_id = 1;
+    string username = 2;
+    string item = 3;
+}
+
+message BuyItemResp {
+    string text = 1;
+    UserProfile profile = 2;
+    bool ok = 3;
+}
+
+message ProfileReq {
+    string map_id = 1;
+    string username = 2;
+}
+
+message ProfileResp {
+    UserProfile profile = 1;
+    bool ok = 2;
+}
+
+message RewardPlayerReq {
+    string map_id = 1;
+    string username = 2;
+    int32 treasure_delta = 3;
+    int32 victory_delta = 4;
+}
+
+message RewardPlayerResp {
+    UserProfile profile = 1;
+    bool ok = 2;
+}
+
+message SnapshotReq {
+    string map_id = 1;
+}
+
+message SnapshotResp {
+    MapView map = 1;
+}
+
+message CountsReq {
+    string map_id = 1;
+}
+
+message CountsResp {
+    int32 players = 1;
+    int32 npcs = 2;
+    int32 treasures = 3;
+    int64 version = 4;
+}
+
+message CheckpointReq {
+    string map_id = 1;
+}
+
+message CheckpointResp {
+    MapCheckpoint checkpoint = 1;
+}
+
+message MapCheckpoint {
+    string map_id = 1;
+    string node_id = 2;
+    int64 version = 3;
+    repeated string terrain = 4;
+    repeated PlayerView players = 5;
+    repeated NPCView npcs = 6;
+    repeated TreasureView treasures = 7;
+    string checkpoint = 8;
+}

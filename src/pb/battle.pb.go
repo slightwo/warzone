@@ -1069,6 +1069,1542 @@ func (x *Message) GetState() *WorldState {
 	return nil
 }
 
+type UserProfile struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Username      string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	PasswordHash  string                 `protobuf:"bytes,2,opt,name=password_hash,json=passwordHash,proto3" json:"password_hash,omitempty"`
+	LastMap       string                 `protobuf:"bytes,3,opt,name=last_map,json=lastMap,proto3" json:"last_map,omitempty"`
+	LastNode      string                 `protobuf:"bytes,4,opt,name=last_node,json=lastNode,proto3" json:"last_node,omitempty"`
+	X             int32                  `protobuf:"varint,5,opt,name=x,proto3" json:"x,omitempty"`
+	Y             int32                  `protobuf:"varint,6,opt,name=y,proto3" json:"y,omitempty"`
+	Hp            int32                  `protobuf:"varint,7,opt,name=hp,proto3" json:"hp,omitempty"`
+	MaxHp         int32                  `protobuf:"varint,8,opt,name=max_hp,json=maxHp,proto3" json:"max_hp,omitempty"`
+	Attack        int32                  `protobuf:"varint,9,opt,name=attack,proto3" json:"attack,omitempty"`
+	Potions       int32                  `protobuf:"varint,10,opt,name=potions,proto3" json:"potions,omitempty"`
+	Treasures     int32                  `protobuf:"varint,11,opt,name=treasures,proto3" json:"treasures,omitempty"`
+	Kills         int32                  `protobuf:"varint,12,opt,name=kills,proto3" json:"kills,omitempty"`
+	Deaths        int32                  `protobuf:"varint,13,opt,name=deaths,proto3" json:"deaths,omitempty"`
+	Victories     int32                  `protobuf:"varint,14,opt,name=victories,proto3" json:"victories,omitempty"`
+	Alive         bool                   `protobuf:"varint,15,opt,name=alive,proto3" json:"alive,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UserProfile) Reset() {
+	*x = UserProfile{}
+	mi := &file_pb_battle_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UserProfile) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UserProfile) ProtoMessage() {}
+
+func (x *UserProfile) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UserProfile.ProtoReflect.Descriptor instead.
+func (*UserProfile) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *UserProfile) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *UserProfile) GetPasswordHash() string {
+	if x != nil {
+		return x.PasswordHash
+	}
+	return ""
+}
+
+func (x *UserProfile) GetLastMap() string {
+	if x != nil {
+		return x.LastMap
+	}
+	return ""
+}
+
+func (x *UserProfile) GetLastNode() string {
+	if x != nil {
+		return x.LastNode
+	}
+	return ""
+}
+
+func (x *UserProfile) GetX() int32 {
+	if x != nil {
+		return x.X
+	}
+	return 0
+}
+
+func (x *UserProfile) GetY() int32 {
+	if x != nil {
+		return x.Y
+	}
+	return 0
+}
+
+func (x *UserProfile) GetHp() int32 {
+	if x != nil {
+		return x.Hp
+	}
+	return 0
+}
+
+func (x *UserProfile) GetMaxHp() int32 {
+	if x != nil {
+		return x.MaxHp
+	}
+	return 0
+}
+
+func (x *UserProfile) GetAttack() int32 {
+	if x != nil {
+		return x.Attack
+	}
+	return 0
+}
+
+func (x *UserProfile) GetPotions() int32 {
+	if x != nil {
+		return x.Potions
+	}
+	return 0
+}
+
+func (x *UserProfile) GetTreasures() int32 {
+	if x != nil {
+		return x.Treasures
+	}
+	return 0
+}
+
+func (x *UserProfile) GetKills() int32 {
+	if x != nil {
+		return x.Kills
+	}
+	return 0
+}
+
+func (x *UserProfile) GetDeaths() int32 {
+	if x != nil {
+		return x.Deaths
+	}
+	return 0
+}
+
+func (x *UserProfile) GetVictories() int32 {
+	if x != nil {
+		return x.Victories
+	}
+	return 0
+}
+
+func (x *UserProfile) GetAlive() bool {
+	if x != nil {
+		return x.Alive
+	}
+	return false
+}
+
+type MapCheckpoint struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	NodeId        string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Version       int64                  `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
+	Terrain       []string               `protobuf:"bytes,4,rep,name=terrain,proto3" json:"terrain,omitempty"`
+	Players       []*PlayerView          `protobuf:"bytes,5,rep,name=players,proto3" json:"players,omitempty"`
+	Npcs          []*NPCView             `protobuf:"bytes,6,rep,name=npcs,proto3" json:"npcs,omitempty"`
+	Treasures     []*TreasureView        `protobuf:"bytes,7,rep,name=treasures,proto3" json:"treasures,omitempty"`
+	Checkpoint    string                 `protobuf:"bytes,8,opt,name=checkpoint,proto3" json:"checkpoint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MapCheckpoint) Reset() {
+	*x = MapCheckpoint{}
+	mi := &file_pb_battle_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MapCheckpoint) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MapCheckpoint) ProtoMessage() {}
+
+func (x *MapCheckpoint) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MapCheckpoint.ProtoReflect.Descriptor instead.
+func (*MapCheckpoint) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *MapCheckpoint) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+func (x *MapCheckpoint) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *MapCheckpoint) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *MapCheckpoint) GetTerrain() []string {
+	if x != nil {
+		return x.Terrain
+	}
+	return nil
+}
+
+func (x *MapCheckpoint) GetPlayers() []*PlayerView {
+	if x != nil {
+		return x.Players
+	}
+	return nil
+}
+
+func (x *MapCheckpoint) GetNpcs() []*NPCView {
+	if x != nil {
+		return x.Npcs
+	}
+	return nil
+}
+
+func (x *MapCheckpoint) GetTreasures() []*TreasureView {
+	if x != nil {
+		return x.Treasures
+	}
+	return nil
+}
+
+func (x *MapCheckpoint) GetCheckpoint() string {
+	if x != nil {
+		return x.Checkpoint
+	}
+	return ""
+}
+
+type AddPlayerReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	Profile       *UserProfile           `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddPlayerReq) Reset() {
+	*x = AddPlayerReq{}
+	mi := &file_pb_battle_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddPlayerReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddPlayerReq) ProtoMessage() {}
+
+func (x *AddPlayerReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddPlayerReq.ProtoReflect.Descriptor instead.
+func (*AddPlayerReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *AddPlayerReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+func (x *AddPlayerReq) GetProfile() *UserProfile {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+type AddPlayerResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddPlayerResp) Reset() {
+	*x = AddPlayerResp{}
+	mi := &file_pb_battle_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddPlayerResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddPlayerResp) ProtoMessage() {}
+
+func (x *AddPlayerResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddPlayerResp.ProtoReflect.Descriptor instead.
+func (*AddPlayerResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *AddPlayerResp) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type RemovePlayerReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemovePlayerReq) Reset() {
+	*x = RemovePlayerReq{}
+	mi := &file_pb_battle_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemovePlayerReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemovePlayerReq) ProtoMessage() {}
+
+func (x *RemovePlayerReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemovePlayerReq.ProtoReflect.Descriptor instead.
+func (*RemovePlayerReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RemovePlayerReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+func (x *RemovePlayerReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type RemovePlayerResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Profile       *UserProfile           `protobuf:"bytes,1,opt,name=profile,proto3" json:"profile,omitempty"`
+	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemovePlayerResp) Reset() {
+	*x = RemovePlayerResp{}
+	mi := &file_pb_battle_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemovePlayerResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemovePlayerResp) ProtoMessage() {}
+
+func (x *RemovePlayerResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemovePlayerResp.ProtoReflect.Descriptor instead.
+func (*RemovePlayerResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RemovePlayerResp) GetProfile() *UserProfile {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+func (x *RemovePlayerResp) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type MovePlayerReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Dir           string                 `protobuf:"bytes,3,opt,name=dir,proto3" json:"dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MovePlayerReq) Reset() {
+	*x = MovePlayerReq{}
+	mi := &file_pb_battle_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MovePlayerReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MovePlayerReq) ProtoMessage() {}
+
+func (x *MovePlayerReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MovePlayerReq.ProtoReflect.Descriptor instead.
+func (*MovePlayerReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *MovePlayerReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+func (x *MovePlayerReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *MovePlayerReq) GetDir() string {
+	if x != nil {
+		return x.Dir
+	}
+	return ""
+}
+
+type MovePlayerResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	Profile       *UserProfile           `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	Ok            bool                   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MovePlayerResp) Reset() {
+	*x = MovePlayerResp{}
+	mi := &file_pb_battle_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MovePlayerResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MovePlayerResp) ProtoMessage() {}
+
+func (x *MovePlayerResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MovePlayerResp.ProtoReflect.Descriptor instead.
+func (*MovePlayerResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *MovePlayerResp) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *MovePlayerResp) GetProfile() *UserProfile {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+func (x *MovePlayerResp) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type AttackReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AttackReq) Reset() {
+	*x = AttackReq{}
+	mi := &file_pb_battle_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttackReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttackReq) ProtoMessage() {}
+
+func (x *AttackReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttackReq.ProtoReflect.Descriptor instead.
+func (*AttackReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *AttackReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+func (x *AttackReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type AttackResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Log           string                 `protobuf:"bytes,1,opt,name=log,proto3" json:"log,omitempty"`
+	BLog          string                 `protobuf:"bytes,2,opt,name=b_log,json=bLog,proto3" json:"b_log,omitempty"`
+	GmLog         string                 `protobuf:"bytes,3,opt,name=gm_log,json=gmLog,proto3" json:"gm_log,omitempty"`
+	Profile       *UserProfile           `protobuf:"bytes,4,opt,name=profile,proto3" json:"profile,omitempty"`
+	Ok            bool                   `protobuf:"varint,5,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AttackResp) Reset() {
+	*x = AttackResp{}
+	mi := &file_pb_battle_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttackResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttackResp) ProtoMessage() {}
+
+func (x *AttackResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttackResp.ProtoReflect.Descriptor instead.
+func (*AttackResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *AttackResp) GetLog() string {
+	if x != nil {
+		return x.Log
+	}
+	return ""
+}
+
+func (x *AttackResp) GetBLog() string {
+	if x != nil {
+		return x.BLog
+	}
+	return ""
+}
+
+func (x *AttackResp) GetGmLog() string {
+	if x != nil {
+		return x.GmLog
+	}
+	return ""
+}
+
+func (x *AttackResp) GetProfile() *UserProfile {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+func (x *AttackResp) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type PingReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PingReq) Reset() {
+	*x = PingReq{}
+	mi := &file_pb_battle_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PingReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PingReq) ProtoMessage() {}
+
+func (x *PingReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PingReq.ProtoReflect.Descriptor instead.
+func (*PingReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *PingReq) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+type PingResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ts            int64                  `protobuf:"varint,1,opt,name=ts,proto3" json:"ts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PingResp) Reset() {
+	*x = PingResp{}
+	mi := &file_pb_battle_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PingResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PingResp) ProtoMessage() {}
+
+func (x *PingResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PingResp.ProtoReflect.Descriptor instead.
+func (*PingResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *PingResp) GetTs() int64 {
+	if x != nil {
+		return x.Ts
+	}
+	return 0
+}
+
+type HealReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HealReq) Reset() {
+	*x = HealReq{}
+	mi := &file_pb_battle_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealReq) ProtoMessage() {}
+
+func (x *HealReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealReq.ProtoReflect.Descriptor instead.
+func (*HealReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *HealReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+func (x *HealReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type HealResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	Profile       *UserProfile           `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	Ok            bool                   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HealResp) Reset() {
+	*x = HealResp{}
+	mi := &file_pb_battle_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealResp) ProtoMessage() {}
+
+func (x *HealResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealResp.ProtoReflect.Descriptor instead.
+func (*HealResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *HealResp) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *HealResp) GetProfile() *UserProfile {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+func (x *HealResp) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type BuyItemReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	Item          string                 `protobuf:"bytes,3,opt,name=item,proto3" json:"item,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuyItemReq) Reset() {
+	*x = BuyItemReq{}
+	mi := &file_pb_battle_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuyItemReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuyItemReq) ProtoMessage() {}
+
+func (x *BuyItemReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuyItemReq.ProtoReflect.Descriptor instead.
+func (*BuyItemReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *BuyItemReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+func (x *BuyItemReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *BuyItemReq) GetItem() string {
+	if x != nil {
+		return x.Item
+	}
+	return ""
+}
+
+type BuyItemResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	Profile       *UserProfile           `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	Ok            bool                   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BuyItemResp) Reset() {
+	*x = BuyItemResp{}
+	mi := &file_pb_battle_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BuyItemResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BuyItemResp) ProtoMessage() {}
+
+func (x *BuyItemResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BuyItemResp.ProtoReflect.Descriptor instead.
+func (*BuyItemResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *BuyItemResp) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *BuyItemResp) GetProfile() *UserProfile {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+func (x *BuyItemResp) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type ProfileReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProfileReq) Reset() {
+	*x = ProfileReq{}
+	mi := &file_pb_battle_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProfileReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProfileReq) ProtoMessage() {}
+
+func (x *ProfileReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProfileReq.ProtoReflect.Descriptor instead.
+func (*ProfileReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ProfileReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+func (x *ProfileReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type ProfileResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Profile       *UserProfile           `protobuf:"bytes,1,opt,name=profile,proto3" json:"profile,omitempty"`
+	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProfileResp) Reset() {
+	*x = ProfileResp{}
+	mi := &file_pb_battle_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProfileResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProfileResp) ProtoMessage() {}
+
+func (x *ProfileResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProfileResp.ProtoReflect.Descriptor instead.
+func (*ProfileResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ProfileResp) GetProfile() *UserProfile {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+func (x *ProfileResp) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type RewardPlayerReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	TreasureDelta int32                  `protobuf:"varint,3,opt,name=treasure_delta,json=treasureDelta,proto3" json:"treasure_delta,omitempty"`
+	VictoryDelta  int32                  `protobuf:"varint,4,opt,name=victory_delta,json=victoryDelta,proto3" json:"victory_delta,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RewardPlayerReq) Reset() {
+	*x = RewardPlayerReq{}
+	mi := &file_pb_battle_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RewardPlayerReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RewardPlayerReq) ProtoMessage() {}
+
+func (x *RewardPlayerReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RewardPlayerReq.ProtoReflect.Descriptor instead.
+func (*RewardPlayerReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *RewardPlayerReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+func (x *RewardPlayerReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *RewardPlayerReq) GetTreasureDelta() int32 {
+	if x != nil {
+		return x.TreasureDelta
+	}
+	return 0
+}
+
+func (x *RewardPlayerReq) GetVictoryDelta() int32 {
+	if x != nil {
+		return x.VictoryDelta
+	}
+	return 0
+}
+
+type RewardPlayerResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Profile       *UserProfile           `protobuf:"bytes,1,opt,name=profile,proto3" json:"profile,omitempty"`
+	Ok            bool                   `protobuf:"varint,2,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RewardPlayerResp) Reset() {
+	*x = RewardPlayerResp{}
+	mi := &file_pb_battle_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RewardPlayerResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RewardPlayerResp) ProtoMessage() {}
+
+func (x *RewardPlayerResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RewardPlayerResp.ProtoReflect.Descriptor instead.
+func (*RewardPlayerResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *RewardPlayerResp) GetProfile() *UserProfile {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+func (x *RewardPlayerResp) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+type SnapshotReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SnapshotReq) Reset() {
+	*x = SnapshotReq{}
+	mi := &file_pb_battle_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotReq) ProtoMessage() {}
+
+func (x *SnapshotReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotReq.ProtoReflect.Descriptor instead.
+func (*SnapshotReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *SnapshotReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+type SnapshotResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Map           *MapView               `protobuf:"bytes,1,opt,name=map,proto3" json:"map,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SnapshotResp) Reset() {
+	*x = SnapshotResp{}
+	mi := &file_pb_battle_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotResp) ProtoMessage() {}
+
+func (x *SnapshotResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotResp.ProtoReflect.Descriptor instead.
+func (*SnapshotResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *SnapshotResp) GetMap() *MapView {
+	if x != nil {
+		return x.Map
+	}
+	return nil
+}
+
+type CountsReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CountsReq) Reset() {
+	*x = CountsReq{}
+	mi := &file_pb_battle_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CountsReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CountsReq) ProtoMessage() {}
+
+func (x *CountsReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CountsReq.ProtoReflect.Descriptor instead.
+func (*CountsReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *CountsReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+type CountsResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Players       int32                  `protobuf:"varint,1,opt,name=players,proto3" json:"players,omitempty"`
+	Npcs          int32                  `protobuf:"varint,2,opt,name=npcs,proto3" json:"npcs,omitempty"`
+	Treasures     int32                  `protobuf:"varint,3,opt,name=treasures,proto3" json:"treasures,omitempty"`
+	Version       int64                  `protobuf:"varint,4,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CountsResp) Reset() {
+	*x = CountsResp{}
+	mi := &file_pb_battle_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CountsResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CountsResp) ProtoMessage() {}
+
+func (x *CountsResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CountsResp.ProtoReflect.Descriptor instead.
+func (*CountsResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *CountsResp) GetPlayers() int32 {
+	if x != nil {
+		return x.Players
+	}
+	return 0
+}
+
+func (x *CountsResp) GetNpcs() int32 {
+	if x != nil {
+		return x.Npcs
+	}
+	return 0
+}
+
+func (x *CountsResp) GetTreasures() int32 {
+	if x != nil {
+		return x.Treasures
+	}
+	return 0
+}
+
+func (x *CountsResp) GetVersion() int64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+type CheckpointReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckpointReq) Reset() {
+	*x = CheckpointReq{}
+	mi := &file_pb_battle_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckpointReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckpointReq) ProtoMessage() {}
+
+func (x *CheckpointReq) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckpointReq.ProtoReflect.Descriptor instead.
+func (*CheckpointReq) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *CheckpointReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+type CheckpointResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Checkpoint    *MapCheckpoint         `protobuf:"bytes,1,opt,name=checkpoint,proto3" json:"checkpoint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckpointResp) Reset() {
+	*x = CheckpointResp{}
+	mi := &file_pb_battle_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckpointResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckpointResp) ProtoMessage() {}
+
+func (x *CheckpointResp) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_battle_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckpointResp.ProtoReflect.Descriptor instead.
+func (*CheckpointResp) Descriptor() ([]byte, []int) {
+	return file_pb_battle_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *CheckpointResp) GetCheckpoint() *MapCheckpoint {
+	if x != nil {
+		return x.Checkpoint
+	}
+	return nil
+}
+
 var File_pb_battle_proto protoreflect.FileDescriptor
 
 const file_pb_battle_proto_rawDesc = "" +
@@ -1182,10 +2718,135 @@ const file_pb_battle_proto_rawDesc = "" +
 	" \x01(\tR\x04text\x12\x0e\n" +
 	"\x02ok\x18\v \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\f \x01(\tR\x05error\x12$\n" +
-	"\x05state\x18\r \x01(\v2\x0e.pb.WorldStateR\x05state2<\n" +
+	"\x05state\x18\r \x01(\v2\x0e.pb.WorldStateR\x05state\"\xfb\x02\n" +
+	"\vUserProfile\x12\x1a\n" +
+	"\busername\x18\x01 \x01(\tR\busername\x12#\n" +
+	"\rpassword_hash\x18\x02 \x01(\tR\fpasswordHash\x12\x19\n" +
+	"\blast_map\x18\x03 \x01(\tR\alastMap\x12\x1b\n" +
+	"\tlast_node\x18\x04 \x01(\tR\blastNode\x12\f\n" +
+	"\x01x\x18\x05 \x01(\x05R\x01x\x12\f\n" +
+	"\x01y\x18\x06 \x01(\x05R\x01y\x12\x0e\n" +
+	"\x02hp\x18\a \x01(\x05R\x02hp\x12\x15\n" +
+	"\x06max_hp\x18\b \x01(\x05R\x05maxHp\x12\x16\n" +
+	"\x06attack\x18\t \x01(\x05R\x06attack\x12\x18\n" +
+	"\apotions\x18\n" +
+	" \x01(\x05R\apotions\x12\x1c\n" +
+	"\ttreasures\x18\v \x01(\x05R\ttreasures\x12\x14\n" +
+	"\x05kills\x18\f \x01(\x05R\x05kills\x12\x16\n" +
+	"\x06deaths\x18\r \x01(\x05R\x06deaths\x12\x1c\n" +
+	"\tvictories\x18\x0e \x01(\x05R\tvictories\x12\x14\n" +
+	"\x05alive\x18\x0f \x01(\bR\x05alive\"\x8e\x02\n" +
+	"\rMapCheckpoint\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\x12\x17\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\x03R\aversion\x12\x18\n" +
+	"\aterrain\x18\x04 \x03(\tR\aterrain\x12(\n" +
+	"\aplayers\x18\x05 \x03(\v2\x0e.pb.PlayerViewR\aplayers\x12\x1f\n" +
+	"\x04npcs\x18\x06 \x03(\v2\v.pb.NPCViewR\x04npcs\x12.\n" +
+	"\ttreasures\x18\a \x03(\v2\x10.pb.TreasureViewR\ttreasures\x12\x1e\n" +
+	"\n" +
+	"checkpoint\x18\b \x01(\tR\n" +
+	"checkpoint\"P\n" +
+	"\fAddPlayerReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\x12)\n" +
+	"\aprofile\x18\x02 \x01(\v2\x0f.pb.UserProfileR\aprofile\"\x1f\n" +
+	"\rAddPlayerResp\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"D\n" +
+	"\x0fRemovePlayerReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\"M\n" +
+	"\x10RemovePlayerResp\x12)\n" +
+	"\aprofile\x18\x01 \x01(\v2\x0f.pb.UserProfileR\aprofile\x12\x0e\n" +
+	"\x02ok\x18\x02 \x01(\bR\x02ok\"T\n" +
+	"\rMovePlayerReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12\x10\n" +
+	"\x03dir\x18\x03 \x01(\tR\x03dir\"_\n" +
+	"\x0eMovePlayerResp\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12)\n" +
+	"\aprofile\x18\x02 \x01(\v2\x0f.pb.UserProfileR\aprofile\x12\x0e\n" +
+	"\x02ok\x18\x03 \x01(\bR\x02ok\">\n" +
+	"\tAttackReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\"\x85\x01\n" +
+	"\n" +
+	"AttackResp\x12\x10\n" +
+	"\x03log\x18\x01 \x01(\tR\x03log\x12\x13\n" +
+	"\x05b_log\x18\x02 \x01(\tR\x04bLog\x12\x15\n" +
+	"\x06gm_log\x18\x03 \x01(\tR\x05gmLog\x12)\n" +
+	"\aprofile\x18\x04 \x01(\v2\x0f.pb.UserProfileR\aprofile\x12\x0e\n" +
+	"\x02ok\x18\x05 \x01(\bR\x02ok\"\"\n" +
+	"\aPingReq\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\x1a\n" +
+	"\bPingResp\x12\x0e\n" +
+	"\x02ts\x18\x01 \x01(\x03R\x02ts\"<\n" +
+	"\aHealReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\"Y\n" +
+	"\bHealResp\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12)\n" +
+	"\aprofile\x18\x02 \x01(\v2\x0f.pb.UserProfileR\aprofile\x12\x0e\n" +
+	"\x02ok\x18\x03 \x01(\bR\x02ok\"S\n" +
+	"\n" +
+	"BuyItemReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12\x12\n" +
+	"\x04item\x18\x03 \x01(\tR\x04item\"\\\n" +
+	"\vBuyItemResp\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12)\n" +
+	"\aprofile\x18\x02 \x01(\v2\x0f.pb.UserProfileR\aprofile\x12\x0e\n" +
+	"\x02ok\x18\x03 \x01(\bR\x02ok\"?\n" +
+	"\n" +
+	"ProfileReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\"H\n" +
+	"\vProfileResp\x12)\n" +
+	"\aprofile\x18\x01 \x01(\v2\x0f.pb.UserProfileR\aprofile\x12\x0e\n" +
+	"\x02ok\x18\x02 \x01(\bR\x02ok\"\x90\x01\n" +
+	"\x0fRewardPlayerReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\x12%\n" +
+	"\x0etreasure_delta\x18\x03 \x01(\x05R\rtreasureDelta\x12#\n" +
+	"\rvictory_delta\x18\x04 \x01(\x05R\fvictoryDelta\"M\n" +
+	"\x10RewardPlayerResp\x12)\n" +
+	"\aprofile\x18\x01 \x01(\v2\x0f.pb.UserProfileR\aprofile\x12\x0e\n" +
+	"\x02ok\x18\x02 \x01(\bR\x02ok\"$\n" +
+	"\vSnapshotReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\"-\n" +
+	"\fSnapshotResp\x12\x1d\n" +
+	"\x03map\x18\x01 \x01(\v2\v.pb.MapViewR\x03map\"\"\n" +
+	"\tCountsReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\"r\n" +
+	"\n" +
+	"CountsResp\x12\x18\n" +
+	"\aplayers\x18\x01 \x01(\x05R\aplayers\x12\x12\n" +
+	"\x04npcs\x18\x02 \x01(\x05R\x04npcs\x12\x1c\n" +
+	"\ttreasures\x18\x03 \x01(\x05R\ttreasures\x12\x18\n" +
+	"\aversion\x18\x04 \x01(\x03R\aversion\"&\n" +
+	"\rCheckpointReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\"C\n" +
+	"\x0eCheckpointResp\x121\n" +
+	"\n" +
+	"checkpoint\x18\x01 \x01(\v2\x11.pb.MapCheckpointR\n" +
+	"checkpoint2<\n" +
 	"\x0eGatewayService\x12*\n" +
 	"\n" +
-	"GameStream\x12\v.pb.Message\x1a\v.pb.Message(\x010\x01B\x10Z\x0ebattleworld/pbb\x06proto3"
+	"GameStream\x12\v.pb.Message\x1a\v.pb.Message(\x010\x012\xbe\x04\n" +
+	"\vNodeService\x12!\n" +
+	"\x04Ping\x12\v.pb.PingReq\x1a\f.pb.PingResp\x120\n" +
+	"\tAddPlayer\x12\x10.pb.AddPlayerReq\x1a\x11.pb.AddPlayerResp\x129\n" +
+	"\fRemovePlayer\x12\x13.pb.RemovePlayerReq\x1a\x14.pb.RemovePlayerResp\x123\n" +
+	"\n" +
+	"MovePlayer\x12\x11.pb.MovePlayerReq\x1a\x12.pb.MovePlayerResp\x12'\n" +
+	"\x06Attack\x12\r.pb.AttackReq\x1a\x0e.pb.AttackResp\x12!\n" +
+	"\x04Heal\x12\v.pb.HealReq\x1a\f.pb.HealResp\x12*\n" +
+	"\aBuyItem\x12\x0e.pb.BuyItemReq\x1a\x0f.pb.BuyItemResp\x12*\n" +
+	"\aProfile\x12\x0e.pb.ProfileReq\x1a\x0f.pb.ProfileResp\x129\n" +
+	"\fRewardPlayer\x12\x13.pb.RewardPlayerReq\x1a\x14.pb.RewardPlayerResp\x12-\n" +
+	"\bSnapshot\x12\x0f.pb.SnapshotReq\x1a\x10.pb.SnapshotResp\x12'\n" +
+	"\x06Counts\x12\r.pb.CountsReq\x1a\x0e.pb.CountsResp\x123\n" +
+	"\n" +
+	"Checkpoint\x12\x11.pb.CheckpointReq\x1a\x12.pb.CheckpointRespB\x10Z\x0ebattleworld/pbb\x06proto3"
 
 var (
 	file_pb_battle_proto_rawDescOnce sync.Once
@@ -1199,18 +2860,44 @@ func file_pb_battle_proto_rawDescGZIP() []byte {
 	return file_pb_battle_proto_rawDescData
 }
 
-var file_pb_battle_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_pb_battle_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_pb_battle_proto_goTypes = []any{
-	(*PlayerView)(nil),   // 0: pb.PlayerView
-	(*NPCView)(nil),      // 1: pb.NPCView
-	(*TreasureView)(nil), // 2: pb.TreasureView
-	(*MapBrief)(nil),     // 3: pb.MapBrief
-	(*NodeView)(nil),     // 4: pb.NodeView
-	(*MapView)(nil),      // 5: pb.MapView
-	(*BossSite)(nil),     // 6: pb.BossSite
-	(*BossView)(nil),     // 7: pb.BossView
-	(*WorldState)(nil),   // 8: pb.WorldState
-	(*Message)(nil),      // 9: pb.Message
+	(*PlayerView)(nil),       // 0: pb.PlayerView
+	(*NPCView)(nil),          // 1: pb.NPCView
+	(*TreasureView)(nil),     // 2: pb.TreasureView
+	(*MapBrief)(nil),         // 3: pb.MapBrief
+	(*NodeView)(nil),         // 4: pb.NodeView
+	(*MapView)(nil),          // 5: pb.MapView
+	(*BossSite)(nil),         // 6: pb.BossSite
+	(*BossView)(nil),         // 7: pb.BossView
+	(*WorldState)(nil),       // 8: pb.WorldState
+	(*Message)(nil),          // 9: pb.Message
+	(*UserProfile)(nil),      // 10: pb.UserProfile
+	(*MapCheckpoint)(nil),    // 11: pb.MapCheckpoint
+	(*AddPlayerReq)(nil),     // 12: pb.AddPlayerReq
+	(*AddPlayerResp)(nil),    // 13: pb.AddPlayerResp
+	(*RemovePlayerReq)(nil),  // 14: pb.RemovePlayerReq
+	(*RemovePlayerResp)(nil), // 15: pb.RemovePlayerResp
+	(*MovePlayerReq)(nil),    // 16: pb.MovePlayerReq
+	(*MovePlayerResp)(nil),   // 17: pb.MovePlayerResp
+	(*AttackReq)(nil),        // 18: pb.AttackReq
+	(*AttackResp)(nil),       // 19: pb.AttackResp
+	(*PingReq)(nil),          // 20: pb.PingReq
+	(*PingResp)(nil),         // 21: pb.PingResp
+	(*HealReq)(nil),          // 22: pb.HealReq
+	(*HealResp)(nil),         // 23: pb.HealResp
+	(*BuyItemReq)(nil),       // 24: pb.BuyItemReq
+	(*BuyItemResp)(nil),      // 25: pb.BuyItemResp
+	(*ProfileReq)(nil),       // 26: pb.ProfileReq
+	(*ProfileResp)(nil),      // 27: pb.ProfileResp
+	(*RewardPlayerReq)(nil),  // 28: pb.RewardPlayerReq
+	(*RewardPlayerResp)(nil), // 29: pb.RewardPlayerResp
+	(*SnapshotReq)(nil),      // 30: pb.SnapshotReq
+	(*SnapshotResp)(nil),     // 31: pb.SnapshotResp
+	(*CountsReq)(nil),        // 32: pb.CountsReq
+	(*CountsResp)(nil),       // 33: pb.CountsResp
+	(*CheckpointReq)(nil),    // 34: pb.CheckpointReq
+	(*CheckpointResp)(nil),   // 35: pb.CheckpointResp
 }
 var file_pb_battle_proto_depIdxs = []int32{
 	0,  // 0: pb.MapView.players:type_name -> pb.PlayerView
@@ -1223,13 +2910,50 @@ var file_pb_battle_proto_depIdxs = []int32{
 	4,  // 7: pb.WorldState.nodes:type_name -> pb.NodeView
 	7,  // 8: pb.WorldState.boss:type_name -> pb.BossView
 	8,  // 9: pb.Message.state:type_name -> pb.WorldState
-	9,  // 10: pb.GatewayService.GameStream:input_type -> pb.Message
-	9,  // 11: pb.GatewayService.GameStream:output_type -> pb.Message
-	11, // [11:12] is the sub-list for method output_type
-	10, // [10:11] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	0,  // 10: pb.MapCheckpoint.players:type_name -> pb.PlayerView
+	1,  // 11: pb.MapCheckpoint.npcs:type_name -> pb.NPCView
+	2,  // 12: pb.MapCheckpoint.treasures:type_name -> pb.TreasureView
+	10, // 13: pb.AddPlayerReq.profile:type_name -> pb.UserProfile
+	10, // 14: pb.RemovePlayerResp.profile:type_name -> pb.UserProfile
+	10, // 15: pb.MovePlayerResp.profile:type_name -> pb.UserProfile
+	10, // 16: pb.AttackResp.profile:type_name -> pb.UserProfile
+	10, // 17: pb.HealResp.profile:type_name -> pb.UserProfile
+	10, // 18: pb.BuyItemResp.profile:type_name -> pb.UserProfile
+	10, // 19: pb.ProfileResp.profile:type_name -> pb.UserProfile
+	10, // 20: pb.RewardPlayerResp.profile:type_name -> pb.UserProfile
+	5,  // 21: pb.SnapshotResp.map:type_name -> pb.MapView
+	11, // 22: pb.CheckpointResp.checkpoint:type_name -> pb.MapCheckpoint
+	9,  // 23: pb.GatewayService.GameStream:input_type -> pb.Message
+	20, // 24: pb.NodeService.Ping:input_type -> pb.PingReq
+	12, // 25: pb.NodeService.AddPlayer:input_type -> pb.AddPlayerReq
+	14, // 26: pb.NodeService.RemovePlayer:input_type -> pb.RemovePlayerReq
+	16, // 27: pb.NodeService.MovePlayer:input_type -> pb.MovePlayerReq
+	18, // 28: pb.NodeService.Attack:input_type -> pb.AttackReq
+	22, // 29: pb.NodeService.Heal:input_type -> pb.HealReq
+	24, // 30: pb.NodeService.BuyItem:input_type -> pb.BuyItemReq
+	26, // 31: pb.NodeService.Profile:input_type -> pb.ProfileReq
+	28, // 32: pb.NodeService.RewardPlayer:input_type -> pb.RewardPlayerReq
+	30, // 33: pb.NodeService.Snapshot:input_type -> pb.SnapshotReq
+	32, // 34: pb.NodeService.Counts:input_type -> pb.CountsReq
+	34, // 35: pb.NodeService.Checkpoint:input_type -> pb.CheckpointReq
+	9,  // 36: pb.GatewayService.GameStream:output_type -> pb.Message
+	21, // 37: pb.NodeService.Ping:output_type -> pb.PingResp
+	13, // 38: pb.NodeService.AddPlayer:output_type -> pb.AddPlayerResp
+	15, // 39: pb.NodeService.RemovePlayer:output_type -> pb.RemovePlayerResp
+	17, // 40: pb.NodeService.MovePlayer:output_type -> pb.MovePlayerResp
+	19, // 41: pb.NodeService.Attack:output_type -> pb.AttackResp
+	23, // 42: pb.NodeService.Heal:output_type -> pb.HealResp
+	25, // 43: pb.NodeService.BuyItem:output_type -> pb.BuyItemResp
+	27, // 44: pb.NodeService.Profile:output_type -> pb.ProfileResp
+	29, // 45: pb.NodeService.RewardPlayer:output_type -> pb.RewardPlayerResp
+	31, // 46: pb.NodeService.Snapshot:output_type -> pb.SnapshotResp
+	33, // 47: pb.NodeService.Counts:output_type -> pb.CountsResp
+	35, // 48: pb.NodeService.Checkpoint:output_type -> pb.CheckpointResp
+	36, // [36:49] is the sub-list for method output_type
+	23, // [23:36] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_pb_battle_proto_init() }
@@ -1243,9 +2967,9 @@ func file_pb_battle_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pb_battle_proto_rawDesc), len(file_pb_battle_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   36,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_pb_battle_proto_goTypes,
 		DependencyIndexes: file_pb_battle_proto_depIdxs,

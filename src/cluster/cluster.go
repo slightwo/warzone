@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -139,7 +140,7 @@ func (c *Cluster) Close() {
 		if !owner.healthy {
 			continue
 		}
-		CP, _ := owner.Checkpoint(mapID)
+		CP, _ := owner.Checkpoint(context.Background(), mapID)
 		CP.Players = []protocol.PlayerView{}
 		_ = c.store.SaveCheckpoint(CP)
 		replicaID := replicas[mapID]
@@ -211,7 +212,9 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 		return nil, errors.New("目标地图当前没有可用节点")
 	}
 
-	owner.AddPlayer(mapID, profile)
+	if err := owner.AddPlayer(context.Background(), mapID, profile); err != nil {
+		return nil, fmt.Errorf("节点添加玩家失败: %v", err)
+	}
 
 	c.mu.Lock()
 	session := &Session{
@@ -245,8 +248,10 @@ func (c *Cluster) Logout(username string) error {
 	if node == nil {
 		return c.store.DeleteHotSession(username)
 	}
-	profile, removed := node.RemovePlayer(session.MapID, username)
-	if removed {
+	profile, removed, err := node.RemovePlayer(context.Background(), session.MapID, username)
+	if err != nil {
+		fmt.Printf("[ERROR] RPC Node RemovePlayer failed: %v\n", err)
+	} else if removed {
 		profile.LastNode = session.NodeID
 		profile.LastMap = session.MapID
 		_ = c.store.SaveProfile(profile)
@@ -259,7 +264,10 @@ func (c *Cluster) Move(username, dir string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	event, _, ok := node.MovePlayer(session.MapID, username, dir)
+	event, _, ok, err := node.MovePlayer(context.Background(), session.MapID, username, dir)
+	if err != nil {
+		return nil, fmt.Errorf("节点RPC移动调用失败: %v", err)
+	}
 	if !ok {
 		return nil, errors.New("移动请求被拒绝")
 	}
@@ -276,7 +284,10 @@ func (c *Cluster) Attack(username string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	event, targetUsername, targetEvent, _, ok := node.Attack(session.MapID, username)
+	event, targetUsername, targetEvent, _, ok, err := node.Attack(context.Background(), session.MapID, username)
+	if err != nil {
+		return nil, fmt.Errorf("节点RPC攻击调用异常: %v", err)
+	}
 	if !ok {
 		return nil, errors.New("攻击请求被拒绝")
 	}
@@ -297,7 +308,10 @@ func (c *Cluster) Heal(username string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	event, _, ok := node.Heal(session.MapID, username)
+	event, _, ok, err := node.Heal(context.Background(), session.MapID, username)
+	if err != nil {
+		return nil, fmt.Errorf("节点RPC治疗调用异常: %v", err)
+	}
 	if !ok {
 		return nil, errors.New("治疗请求被拒绝")
 	}
@@ -314,7 +328,10 @@ func (c *Cluster) BuyItem(username, item string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	event, profile, ok := node.BuyItem(session.MapID, username, item)
+	event, profile, ok, err := node.BuyItem(context.Background(), session.MapID, username, item)
+	if err != nil {
+		return nil, fmt.Errorf("节点RPC商店请求异常: %v", err)
+	}
 	if !ok {
 		return nil, errors.New("商店请求被拒绝")
 	}
@@ -334,7 +351,10 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 		return nil, err
 	}
 
-	profile, ok := node.Profile(session.MapID, username)
+	profile, ok, err := node.Profile(context.Background(), session.MapID, username)
+	if err != nil {
+		return nil, fmt.Errorf("节点RPC获取Profile异常: %v", err)
+	}
 	if !profile.Alive {
 		return nil, errors.New("倒地时无法攻击")
 	}
@@ -386,8 +406,10 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 			c.mu.RLock()
 			session := c.sessions[name]
 			c.mu.RUnlock()
-			profile, ok := node.RewardPlayer(session.MapID, name, con, con) //,name,contri,contri)
-			if ok {
+			profile, ok, err := node.RewardPlayer(context.Background(), session.MapID, name, con, con) //,name,contri,contri)
+			if err != nil {
+				fmt.Printf("[ERROR] RPC RewardPlayer 异常: %v\n", err)
+			} else if ok {
 				c.pushEvent(name, "您参与了boss攻略战！")
 				profile.LastNode = session.NodeID
 				profile.LastMap = session.MapID
@@ -416,7 +438,11 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 		return nil, err
 	}
 	c.mu.RLock()
-	profile, ok := src_node.Profile(session.MapID, username)
+	profile, ok, err := src_node.Profile(context.Background(), session.MapID, username)
+	if err != nil {
+		c.mu.RUnlock()
+		return nil, fmt.Errorf("节点RPC获取Profile异常: %v", err)
+	}
 	if !ok {
 		c.mu.RUnlock()
 		return nil, errors.New("获取玩家profile失败")
@@ -428,19 +454,30 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 	dst_node := c.owners[targetMap]
 	dst := c.nodes[dst_node]
 	c.mu.RUnlock()
-	profile, ok = src_node.RemovePlayer(session.MapID, username)
 
+	profile, ok, err = src_node.RemovePlayer(context.Background(), session.MapID, username)
+
+	if err != nil {
+		return nil, fmt.Errorf("源节点RPC移除玩家异常: %v", err)
+	}
 	if !ok {
 		return nil, errors.New("源节点移除玩家失败")
 	}
 
-	_, stillExists := src_node.Profile(session.MapID, username)
-	if stillExists {
+	_, stillExists, err := src_node.Profile(context.Background(), session.MapID, username)
+	if err != nil {
+		fmt.Printf("[ERROR] 源节点RPC验证玩家存在异常: %v\n", err)
+	} else if stillExists {
 		fmt.Printf("[WARN] 移除后玩家仍然存在于源地图！\n")
 	}
 
-	dst.AddPlayer(targetMap, &profile)
-	profile, _ = dst.Profile(targetMap, username)
+	if err := dst.AddPlayer(context.Background(), targetMap, &profile); err != nil {
+		return nil, fmt.Errorf("目标节点添加玩家失败: %v", err)
+	}
+	profile, ok, err = dst.Profile(context.Background(), targetMap, username)
+	if err != nil {
+		return nil, fmt.Errorf("获取移动后用户信息异常: %v", err)
+	}
 	if !ok {
 		return nil, errors.New("获取移动后用户信息失败")
 	}
@@ -495,9 +532,9 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 		return nil, errors.New("当前承载节点已不可用")
 	}
 
-	mapView, err := node.Snapshot(session.MapID)
+	mapView, err := node.Snapshot(context.Background(), session.MapID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("节点RPC获取地图快照异常: %v", err)
 	}
 
 	self := protocol.PlayerView{}
@@ -521,8 +558,9 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 		if host == nil {
 			continue
 		}
-		players, npcs, treasures, version, err := host.Counts(mapID)
+		players, npcs, treasures, version, err := host.Counts(context.Background(), mapID)
 		if err != nil {
+			fmt.Printf("[WARN] 节点RPC获取地图状态(Counts)异常: %v\n", err)
 			continue
 		}
 		cfg := c.configs[mapID]
@@ -649,7 +687,10 @@ func (c *Cluster) persistSessionState(username string) error {
 		return nil
 	}
 
-	profile, ok := node.Profile(session.MapID, username)
+	profile, ok, err := node.Profile(context.Background(), session.MapID, username)
+	if err != nil {
+		return fmt.Errorf("节点RPC获取Profile异常: %v", err)
+	}
 	if !ok {
 		return nil
 	}
@@ -779,7 +820,7 @@ func (c *Cluster) checkpointLoop() {
 				if !owner.healthy {
 					continue
 				}
-				CP, _ := owner.Checkpoint(mapID)
+				CP, _ := owner.Checkpoint(context.Background(), mapID)
 
 				_ = c.store.SaveCheckpoint(CP)
 				replicaID := replicas[mapID]
@@ -917,7 +958,7 @@ func (c *Cluster) failNode(nodeID string) (string, error) {
 	}
 	view := node.View()
 	for _, mapID := range view.PrimaryMaps {
-		cp, err := node.Checkpoint(mapID)
+		cp, err := node.Checkpoint(context.Background(), mapID)
 		if err != nil {
 			continue
 		}
@@ -1078,88 +1119,95 @@ func (n *NodeService) RestorePrimaryMap(cfg world.MapConfig, cp protocol.MapChec
 	instance.RestoreCheckpoint(cp)
 }
 
-func (n *NodeService) AddPlayer(mapID string, profile *protocol.UserProfile) {
+func (n *NodeService) AddPlayer(ctx context.Context, mapID string, profile *protocol.UserProfile) error {
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
 	if instance == nil {
-		fmt.Println("add player：没有找到源节点")
-		return
+		return errors.New("add player：没有找到源节点")
 	}
 	instance.AddOrRestorePlayer(profile)
+	return nil
 }
 
-func (n *NodeService) RemovePlayer(mapID, username string) (protocol.UserProfile, bool) {
+func (n *NodeService) RemovePlayer(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error) {
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
 	if instance == nil {
-		return protocol.UserProfile{}, false
+		return protocol.UserProfile{}, false, nil
 	}
-	return instance.RemovePlayer(username)
+	profile, ok := instance.RemovePlayer(username)
+	return profile, ok, nil
 }
 
-func (n *NodeService) MovePlayer(mapID, username, dir string) (string, protocol.UserProfile, bool) {
+func (n *NodeService) MovePlayer(ctx context.Context, mapID, username, dir string) (string, protocol.UserProfile, bool, error) {
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
 	if instance == nil {
-		return "", protocol.UserProfile{}, false
+		return "", protocol.UserProfile{}, false, nil
 	}
-	return instance.MovePlayer(username, dir)
+	text, profile, ok := instance.MovePlayer(username, dir)
+	return text, profile, ok, nil
 }
 
-func (n *NodeService) Attack(mapID, username string) (string, string, string, protocol.UserProfile, bool) {
+func (n *NodeService) Attack(ctx context.Context, mapID, username string) (string, string, string, protocol.UserProfile, bool, error) {
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
 	if instance == nil {
-		return "", "", "", protocol.UserProfile{}, false
+		return "", "", "", protocol.UserProfile{}, false, nil
 	}
-	return instance.Attack(username)
+	log1, log2, gmLog, profile, ok := instance.Attack(username)
+	return log1, log2, gmLog, profile, ok, nil
 }
 
-func (n *NodeService) Heal(mapID, username string) (string, protocol.UserProfile, bool) {
+func (n *NodeService) Heal(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error) {
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
 	if instance == nil {
-		return "", protocol.UserProfile{}, false
+		return "", protocol.UserProfile{}, false, nil
 	}
-	return instance.HealPlayer(username)
+	text, profile, ok := instance.HealPlayer(username)
+	return text, profile, ok, nil
 }
 
-func (n *NodeService) BuyItem(mapID, username, item string) (string, protocol.UserProfile, bool) {
+func (n *NodeService) BuyItem(ctx context.Context, mapID, username, item string) (string, protocol.UserProfile, bool, error) {
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
 	if instance == nil {
-		return "", protocol.UserProfile{}, false
+		return "", protocol.UserProfile{}, false, nil
 	}
-	return instance.BuyItem(username, item)
+	text, profile, ok := instance.BuyItem(username, item)
+	return text, profile, ok, nil
 }
 
-func (n *NodeService) Profile(mapID, username string) (protocol.UserProfile, bool) {
+func (n *NodeService) Profile(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error) {
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
 	if instance == nil {
-		return protocol.UserProfile{}, false
+		return protocol.UserProfile{}, false, nil
 	}
-	return instance.ProfileOf(username)
+	profile, ok := instance.ProfileOf(username)
+	return profile, ok, nil
 }
 
-func (n *NodeService) RewardPlayer(mapID, username string, treasureDelta, victoryDelta int) (protocol.UserProfile, bool) {
+func (n *NodeService) RewardPlayer(ctx context.Context, mapID, username string, treasureDelta, victoryDelta int) (protocol.UserProfile, bool, error) {
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
 	if instance == nil {
-		return protocol.UserProfile{}, false
+		return protocol.UserProfile{}, false, nil
 	}
-	return instance.RewardPlayer(username, treasureDelta, victoryDelta)
+	profile, ok := instance.RewardPlayer(username, treasureDelta, victoryDelta)
+	return profile, ok, nil
 }
 
-func (n *NodeService) Snapshot(mapID string) (protocol.MapView, error) {
+func (n *NodeService) Snapshot(ctx context.Context, mapID string) (protocol.MapView, error) {
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -1169,7 +1217,7 @@ func (n *NodeService) Snapshot(mapID string) (protocol.MapView, error) {
 	return instance.Snapshot(n.ID), nil
 }
 
-func (n *NodeService) Counts(mapID string) (int, int, int, int64, error) {
+func (n *NodeService) Counts(ctx context.Context, mapID string) (int, int, int, int64, error) {
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -1180,7 +1228,7 @@ func (n *NodeService) Counts(mapID string) (int, int, int, int64, error) {
 	return players, npcs, treasures, version, nil
 }
 
-func (n *NodeService) Checkpoint(mapID string) (protocol.MapCheckpoint, error) {
+func (n *NodeService) Checkpoint(ctx context.Context, mapID string) (protocol.MapCheckpoint, error) {
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()

@@ -1,1 +1,10 @@
 gRPC 网关已启动：127.0.0.1:9310
+
+2026/04/16 10:25:50 [32m/home/slightwo/L3RandP/src/storage/store.go:212 [33mSLOW SQL >= 200ms
+[0m[31;1m[202.146ms] [33m[rows:1][35m UPDATE "users" SET "last_map"='green',"last_node"='node-a',"x"=38,"y"=5,"hp"=84,"max_hp"=120,"attack"=35,"potions"=3,"treasures"=0,"kills"=0,"deaths"=0,"victories"=0,"alive"=true WHERE "username" = 'bench_user_420_1776306232288430886'[0m
+
+2026/04/16 10:25:50 [32m/home/slightwo/L3RandP/src/storage/store.go:212 [33mSLOW SQL >= 200ms
+[0m[31;1m[204.178ms] [33m[rows:1][35m UPDATE "users" SET "last_map"='green',"last_node"='node-a',"x"=9,"y"=20,"hp"=120,"max_hp"=120,"attack"=35,"potions"=3,"treasures"=0,"kills"=0,"deaths"=0,"victories"=0,"alive"=true WHERE "username" = 'bench_user_165_1776306230877454652'[0m
+
+2026/04/16 10:25:50 [32m/home/slightwo/L3RandP/src/storage/store.go:212 [33mSLOW SQL >= 200ms
+[0m[31;1m[210.622ms] [33m[rows:1][35m UPDATE "users" SET "last_map"='cave',"last_node"='node-b',"x"=47,"y"=1,"hp"=120,"max_hp"=120,"attack"=35,"potions"=3,"treasures"=0,"kills"=0,"deaths"=0,"victories"=0,"alive"=true WHERE "username" = 'bench_user_16_1776306230048717364'[0m

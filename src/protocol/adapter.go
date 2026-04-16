@@ -338,3 +338,46 @@ func FromProtoMessage(m *pb.Message) Message {
 		State:    FromProtoWorldState(m.State),
 	}
 }
+
+func ToProtoUserProfile(u UserProfile) *pb.UserProfile {
+	return &pb.UserProfile{
+		Username:     u.Username,
+		PasswordHash: u.PasswordHash,
+		LastMap:      u.LastMap,
+		LastNode:     u.LastNode,
+		X:            int32(u.X),
+		Y:            int32(u.Y),
+		Hp:           int32(u.HP),
+		MaxHp:        int32(u.MaxHP),
+		Attack:       int32(u.Attack),
+		Potions:      int32(u.Potions),
+		Treasures:    int32(u.Treasures),
+		Kills:        int32(u.Kills),
+		Deaths:       int32(u.Deaths),
+		Victories:    int32(u.Victories),
+		Alive:        u.Alive,
+	}
+}
+
+func FromProtoUserProfile(u *pb.UserProfile) UserProfile {
+	if u == nil {
+		return UserProfile{}
+	}
+	return UserProfile{
+		Username:     u.Username,
+		PasswordHash: u.PasswordHash,
+		LastMap:      u.LastMap,
+		LastNode:     u.LastNode,
+		X:            int(u.X),
+		Y:            int(u.Y),
+		HP:           int(u.Hp),
+		MaxHP:        int(u.MaxHp),
+		Attack:       int(u.Attack),
+		Potions:      int(u.Potions),
+		Treasures:    int(u.Treasures),
+		Kills:        int(u.Kills),
+		Deaths:       int(u.Deaths),
+		Victories:    int(u.Victories),
+		Alive:        u.Alive,
+	}
+}
