@@ -37,7 +37,7 @@ func main() {
 		log.Printf("警告: Store 初始化失败，可能是PG连不上，暂时只通过gRPC等待连接: %v", err)
 	}
 
-	ns := node.NewNodeService(nodeID, nodeAddr)
+	ns := node.NewNodeService(nodeID, nodeAddr, store)
 	if err := ns.Start(); err != nil {
 		log.Fatalf("逻辑节点启动失败: %v", err)
 	}

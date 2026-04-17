@@ -128,6 +128,7 @@ const (
 	NodeService_Counts_FullMethodName         = "/pb.NodeService/Counts"
 	NodeService_Checkpoint_FullMethodName     = "/pb.NodeService/Checkpoint"
 	NodeService_BackgroundStep_FullMethodName = "/pb.NodeService/BackgroundStep"
+	NodeService_AttackBoss_FullMethodName     = "/pb.NodeService/AttackBoss"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -147,6 +148,7 @@ type NodeServiceClient interface {
 	Counts(ctx context.Context, in *CountsReq, opts ...grpc.CallOption) (*CountsResp, error)
 	Checkpoint(ctx context.Context, in *CheckpointReq, opts ...grpc.CallOption) (*CheckpointResp, error)
 	BackgroundStep(ctx context.Context, in *BackgroundStepReq, opts ...grpc.CallOption) (*BackgroundStepResp, error)
+	AttackBoss(ctx context.Context, in *AttackBossReq, opts ...grpc.CallOption) (*AttackBossResp, error)
 }
 
 type nodeServiceClient struct {
@@ -287,6 +289,16 @@ func (c *nodeServiceClient) BackgroundStep(ctx context.Context, in *BackgroundSt
 	return out, nil
 }
 
+func (c *nodeServiceClient) AttackBoss(ctx context.Context, in *AttackBossReq, opts ...grpc.CallOption) (*AttackBossResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AttackBossResp)
+	err := c.cc.Invoke(ctx, NodeService_AttackBoss_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServiceServer is the server API for NodeService service.
 // All implementations must embed UnimplementedNodeServiceServer
 // for forward compatibility.
@@ -304,6 +316,7 @@ type NodeServiceServer interface {
 	Counts(context.Context, *CountsReq) (*CountsResp, error)
 	Checkpoint(context.Context, *CheckpointReq) (*CheckpointResp, error)
 	BackgroundStep(context.Context, *BackgroundStepReq) (*BackgroundStepResp, error)
+	AttackBoss(context.Context, *AttackBossReq) (*AttackBossResp, error)
 	mustEmbedUnimplementedNodeServiceServer()
 }
 
@@ -352,6 +365,9 @@ func (UnimplementedNodeServiceServer) Checkpoint(context.Context, *CheckpointReq
 }
 func (UnimplementedNodeServiceServer) BackgroundStep(context.Context, *BackgroundStepReq) (*BackgroundStepResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method BackgroundStep not implemented")
+}
+func (UnimplementedNodeServiceServer) AttackBoss(context.Context, *AttackBossReq) (*AttackBossResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method AttackBoss not implemented")
 }
 func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
 func (UnimplementedNodeServiceServer) testEmbeddedByValue()                     {}
@@ -608,6 +624,24 @@ func _NodeService_BackgroundStep_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NodeService_AttackBoss_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AttackBossReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).AttackBoss(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_AttackBoss_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).AttackBoss(ctx, req.(*AttackBossReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NodeService_ServiceDesc is the grpc.ServiceDesc for NodeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -666,6 +700,10 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BackgroundStep",
 			Handler:    _NodeService_BackgroundStep_Handler,
+		},
+		{
+			MethodName: "AttackBoss",
+			Handler:    _NodeService_AttackBoss_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

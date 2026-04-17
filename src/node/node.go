@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"battleworld/protocol"
+	"battleworld/storage"
 	"battleworld/world"
 )
 
@@ -17,6 +18,7 @@ type NodeService struct {
 	mu               sync.RWMutex
 	ID               string
 	Addr             string
+	store            *storage.Store
 	healthy          bool
 	lastHeartbeat    time.Time
 	maps             map[string]*world.World
@@ -24,10 +26,11 @@ type NodeService struct {
 	ln               net.Listener
 }
 
-func NewNodeService(id, addr string) *NodeService {
+func NewNodeService(id, addr string, store *storage.Store) *NodeService {
 	return &NodeService{
 		ID:               id,
 		Addr:             addr,
+		store:            store,
 		healthy:          true,
 		lastHeartbeat:    time.Now(),
 		maps:             make(map[string]*world.World),
@@ -109,6 +112,7 @@ func (n *NodeService) RemovePlayer(ctx context.Context, mapID, username string) 
 }
 
 func (n *NodeService) MovePlayer(ctx context.Context, mapID, username, dir string) (string, protocol.UserProfile, bool, error) {
+	fmt.Println("[debug] node.go:move")
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -172,6 +176,91 @@ func (n *NodeService) RewardPlayer(ctx context.Context, mapID, username string, 
 	}
 	profile, ok := instance.RewardPlayer(username, treasureDelta, victoryDelta)
 	return profile, ok, nil
+}
+
+func manhattan(ax, ay, bx, by int) int {
+	dx := ax - bx
+	if dx < 0 {
+		dx = -dx
+	}
+	dy := ay - by
+	if dy < 0 {
+		dy = -dy
+	}
+	return dx + dy
+}
+
+func (n *NodeService) AttackBoss(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error) {
+	fmt.Println("[debug]进入node.go attackBoss")
+	n.mu.RLock()
+	instance := n.maps[mapID]
+	n.mu.RUnlock()
+	if instance == nil {
+		return "", protocol.UserProfile{}, true, fmt.Errorf("地图 %q 当前不在节点 %s 上", mapID, n.ID)
+	}
+
+	profile, ok := instance.ProfileOf(username)
+	if !ok {
+		fmt.Println("[debug]node.go attackBoss:获取玩家profile失败")
+		return "", protocol.UserProfile{}, true, errors.New("获取玩家profile失败")
+	}
+	if !profile.Alive {
+		fmt.Println("[debug]node.go attackBoss:倒地时无法攻击")
+
+		return "倒地时无法攻击", profile, true, nil
+	}
+
+	state, hp, err := n.store.LoadGlobalBoss()
+	if err != nil || !state.Alive {
+		fmt.Println("[debug]node.go attackBoss:首领未复活")
+		return "首领还在复活倒计时", profile, true, nil
+	}
+
+	var bossSite *protocol.BossSite
+	for _, site := range state.Sites {
+		if site.MapID == mapID {
+			s := site
+			bossSite = &s
+			break
+		}
+	}
+	if bossSite == nil {
+		fmt.Println("[debug]node.go attackBoss:当前地图无首领")
+		return "当前地图没有首领的位面", profile, true, nil
+	}
+
+	if manhattan(bossSite.X, bossSite.Y, profile.X, profile.Y) > protocol.BossAtkRange {
+		fmt.Println("[debug]node.go attackBoss:首领范围外")
+		return fmt.Sprintf("首领在范围外,剩余HP:%d", hp), profile, true, nil
+	}
+
+	damage := profile.Attack
+	newHp, err := n.store.DecrGlobalBossHP(username, damage)
+	if err != nil {
+		fmt.Println("[debug]node.go attackBoss:攻击首领时err：", err)
+		return "", protocol.UserProfile{}, true, err
+	}
+
+	newHpMaxZero := newHp
+	if newHpMaxZero < 0 {
+		newHpMaxZero = 0
+	}
+	event := fmt.Sprintf("%s 对 %s 造成了 %d 点伤害！剩余HP：%d", username, state.Name, damage, newHpMaxZero)
+
+	if newHp <= 0 && state.Alive {
+		if n.store.TryLockBossKill() {
+			state, _, _ = n.store.LoadGlobalBoss()
+			if state.Alive {
+				state.Alive = false
+				state.LastHit = username
+				state.RespawnAt = time.Now().Add(15 * time.Second)
+				n.store.SaveGlobalBoss(state)
+				event += fmt.Sprintf("\nboss:%s,已经死亡！终结者：%s", state.Name, username)
+			}
+		}
+	}
+	fmt.Println("[debug]node.go attackBoss:成功")
+	return event, profile, true, nil
 }
 
 func (n *NodeService) Snapshot(ctx context.Context, mapID string) (protocol.MapView, error) {

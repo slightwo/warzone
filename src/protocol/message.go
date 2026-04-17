@@ -131,6 +131,15 @@ type BossSite struct {
 	Y     int    `json:"y"`
 }
 
+type BossState struct {
+	Name      string     `json:"name"`
+	Alive     bool       `json:"alive"`
+	LastHit   string     `json:"last_hit"`
+	RespawnAt time.Time  `json:"respawn_at"`
+	AttackGap int        `json:"attack_gap"`
+	Sites     []BossSite `json:"sites"`
+	Version   int64      `json:"version"`
+}
 type BossView struct {
 	Name      string     `json:"name"`
 	HP        int        `json:"hp"`

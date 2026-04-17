@@ -1761,6 +1761,118 @@ func (x *PingResp) GetTs() int64 {
 	return 0
 }
 
+type AttackBossReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	MapId         string                 `protobuf:"bytes,1,opt,name=map_id,json=mapId,proto3" json:"map_id,omitempty"`
+	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AttackBossReq) Reset() {
+	*x = AttackBossReq{}
+	mi := &file_battle_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttackBossReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttackBossReq) ProtoMessage() {}
+
+func (x *AttackBossReq) ProtoReflect() protoreflect.Message {
+	mi := &file_battle_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttackBossReq.ProtoReflect.Descriptor instead.
+func (*AttackBossReq) Descriptor() ([]byte, []int) {
+	return file_battle_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *AttackBossReq) GetMapId() string {
+	if x != nil {
+		return x.MapId
+	}
+	return ""
+}
+
+func (x *AttackBossReq) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+type AttackBossResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	Profile       *UserProfile           `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	Ok            bool                   `protobuf:"varint,3,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AttackBossResp) Reset() {
+	*x = AttackBossResp{}
+	mi := &file_battle_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AttackBossResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AttackBossResp) ProtoMessage() {}
+
+func (x *AttackBossResp) ProtoReflect() protoreflect.Message {
+	mi := &file_battle_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AttackBossResp.ProtoReflect.Descriptor instead.
+func (*AttackBossResp) Descriptor() ([]byte, []int) {
+	return file_battle_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *AttackBossResp) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *AttackBossResp) GetProfile() *UserProfile {
+	if x != nil {
+		return x.Profile
+	}
+	return nil
+}
+
+func (x *AttackBossResp) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
 type BackgroundStepReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1769,7 +1881,7 @@ type BackgroundStepReq struct {
 
 func (x *BackgroundStepReq) Reset() {
 	*x = BackgroundStepReq{}
-	mi := &file_battle_proto_msgTypes[21]
+	mi := &file_battle_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1781,7 +1893,7 @@ func (x *BackgroundStepReq) String() string {
 func (*BackgroundStepReq) ProtoMessage() {}
 
 func (x *BackgroundStepReq) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[21]
+	mi := &file_battle_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1794,7 +1906,7 @@ func (x *BackgroundStepReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackgroundStepReq.ProtoReflect.Descriptor instead.
 func (*BackgroundStepReq) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{21}
+	return file_battle_proto_rawDescGZIP(), []int{23}
 }
 
 type BackgroundStepResp struct {
@@ -1806,7 +1918,7 @@ type BackgroundStepResp struct {
 
 func (x *BackgroundStepResp) Reset() {
 	*x = BackgroundStepResp{}
-	mi := &file_battle_proto_msgTypes[22]
+	mi := &file_battle_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1818,7 +1930,7 @@ func (x *BackgroundStepResp) String() string {
 func (*BackgroundStepResp) ProtoMessage() {}
 
 func (x *BackgroundStepResp) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[22]
+	mi := &file_battle_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1831,7 +1943,7 @@ func (x *BackgroundStepResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackgroundStepResp.ProtoReflect.Descriptor instead.
 func (*BackgroundStepResp) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{22}
+	return file_battle_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *BackgroundStepResp) GetEvents() []*MapEvents {
@@ -1851,7 +1963,7 @@ type MapEvents struct {
 
 func (x *MapEvents) Reset() {
 	*x = MapEvents{}
-	mi := &file_battle_proto_msgTypes[23]
+	mi := &file_battle_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1863,7 +1975,7 @@ func (x *MapEvents) String() string {
 func (*MapEvents) ProtoMessage() {}
 
 func (x *MapEvents) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[23]
+	mi := &file_battle_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1876,7 +1988,7 @@ func (x *MapEvents) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MapEvents.ProtoReflect.Descriptor instead.
 func (*MapEvents) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{23}
+	return file_battle_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *MapEvents) GetMapId() string {
@@ -1903,7 +2015,7 @@ type HealReq struct {
 
 func (x *HealReq) Reset() {
 	*x = HealReq{}
-	mi := &file_battle_proto_msgTypes[24]
+	mi := &file_battle_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1915,7 +2027,7 @@ func (x *HealReq) String() string {
 func (*HealReq) ProtoMessage() {}
 
 func (x *HealReq) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[24]
+	mi := &file_battle_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1928,7 +2040,7 @@ func (x *HealReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealReq.ProtoReflect.Descriptor instead.
 func (*HealReq) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{24}
+	return file_battle_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *HealReq) GetMapId() string {
@@ -1956,7 +2068,7 @@ type HealResp struct {
 
 func (x *HealResp) Reset() {
 	*x = HealResp{}
-	mi := &file_battle_proto_msgTypes[25]
+	mi := &file_battle_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1968,7 +2080,7 @@ func (x *HealResp) String() string {
 func (*HealResp) ProtoMessage() {}
 
 func (x *HealResp) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[25]
+	mi := &file_battle_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1981,7 +2093,7 @@ func (x *HealResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealResp.ProtoReflect.Descriptor instead.
 func (*HealResp) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{25}
+	return file_battle_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *HealResp) GetText() string {
@@ -2016,7 +2128,7 @@ type BuyItemReq struct {
 
 func (x *BuyItemReq) Reset() {
 	*x = BuyItemReq{}
-	mi := &file_battle_proto_msgTypes[26]
+	mi := &file_battle_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2028,7 +2140,7 @@ func (x *BuyItemReq) String() string {
 func (*BuyItemReq) ProtoMessage() {}
 
 func (x *BuyItemReq) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[26]
+	mi := &file_battle_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2041,7 +2153,7 @@ func (x *BuyItemReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuyItemReq.ProtoReflect.Descriptor instead.
 func (*BuyItemReq) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{26}
+	return file_battle_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *BuyItemReq) GetMapId() string {
@@ -2076,7 +2188,7 @@ type BuyItemResp struct {
 
 func (x *BuyItemResp) Reset() {
 	*x = BuyItemResp{}
-	mi := &file_battle_proto_msgTypes[27]
+	mi := &file_battle_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2088,7 +2200,7 @@ func (x *BuyItemResp) String() string {
 func (*BuyItemResp) ProtoMessage() {}
 
 func (x *BuyItemResp) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[27]
+	mi := &file_battle_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2101,7 +2213,7 @@ func (x *BuyItemResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BuyItemResp.ProtoReflect.Descriptor instead.
 func (*BuyItemResp) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{27}
+	return file_battle_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *BuyItemResp) GetText() string {
@@ -2135,7 +2247,7 @@ type ProfileReq struct {
 
 func (x *ProfileReq) Reset() {
 	*x = ProfileReq{}
-	mi := &file_battle_proto_msgTypes[28]
+	mi := &file_battle_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2147,7 +2259,7 @@ func (x *ProfileReq) String() string {
 func (*ProfileReq) ProtoMessage() {}
 
 func (x *ProfileReq) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[28]
+	mi := &file_battle_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2160,7 +2272,7 @@ func (x *ProfileReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProfileReq.ProtoReflect.Descriptor instead.
 func (*ProfileReq) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{28}
+	return file_battle_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ProfileReq) GetMapId() string {
@@ -2187,7 +2299,7 @@ type ProfileResp struct {
 
 func (x *ProfileResp) Reset() {
 	*x = ProfileResp{}
-	mi := &file_battle_proto_msgTypes[29]
+	mi := &file_battle_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2199,7 +2311,7 @@ func (x *ProfileResp) String() string {
 func (*ProfileResp) ProtoMessage() {}
 
 func (x *ProfileResp) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[29]
+	mi := &file_battle_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2212,7 +2324,7 @@ func (x *ProfileResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProfileResp.ProtoReflect.Descriptor instead.
 func (*ProfileResp) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{29}
+	return file_battle_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ProfileResp) GetProfile() *UserProfile {
@@ -2241,7 +2353,7 @@ type RewardPlayerReq struct {
 
 func (x *RewardPlayerReq) Reset() {
 	*x = RewardPlayerReq{}
-	mi := &file_battle_proto_msgTypes[30]
+	mi := &file_battle_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2253,7 +2365,7 @@ func (x *RewardPlayerReq) String() string {
 func (*RewardPlayerReq) ProtoMessage() {}
 
 func (x *RewardPlayerReq) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[30]
+	mi := &file_battle_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2266,7 +2378,7 @@ func (x *RewardPlayerReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RewardPlayerReq.ProtoReflect.Descriptor instead.
 func (*RewardPlayerReq) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{30}
+	return file_battle_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *RewardPlayerReq) GetMapId() string {
@@ -2307,7 +2419,7 @@ type RewardPlayerResp struct {
 
 func (x *RewardPlayerResp) Reset() {
 	*x = RewardPlayerResp{}
-	mi := &file_battle_proto_msgTypes[31]
+	mi := &file_battle_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2319,7 +2431,7 @@ func (x *RewardPlayerResp) String() string {
 func (*RewardPlayerResp) ProtoMessage() {}
 
 func (x *RewardPlayerResp) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[31]
+	mi := &file_battle_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2332,7 +2444,7 @@ func (x *RewardPlayerResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RewardPlayerResp.ProtoReflect.Descriptor instead.
 func (*RewardPlayerResp) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{31}
+	return file_battle_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *RewardPlayerResp) GetProfile() *UserProfile {
@@ -2358,7 +2470,7 @@ type SnapshotReq struct {
 
 func (x *SnapshotReq) Reset() {
 	*x = SnapshotReq{}
-	mi := &file_battle_proto_msgTypes[32]
+	mi := &file_battle_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2370,7 +2482,7 @@ func (x *SnapshotReq) String() string {
 func (*SnapshotReq) ProtoMessage() {}
 
 func (x *SnapshotReq) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[32]
+	mi := &file_battle_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2383,7 +2495,7 @@ func (x *SnapshotReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotReq.ProtoReflect.Descriptor instead.
 func (*SnapshotReq) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{32}
+	return file_battle_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *SnapshotReq) GetMapId() string {
@@ -2402,7 +2514,7 @@ type SnapshotResp struct {
 
 func (x *SnapshotResp) Reset() {
 	*x = SnapshotResp{}
-	mi := &file_battle_proto_msgTypes[33]
+	mi := &file_battle_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2414,7 +2526,7 @@ func (x *SnapshotResp) String() string {
 func (*SnapshotResp) ProtoMessage() {}
 
 func (x *SnapshotResp) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[33]
+	mi := &file_battle_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2427,7 +2539,7 @@ func (x *SnapshotResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotResp.ProtoReflect.Descriptor instead.
 func (*SnapshotResp) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{33}
+	return file_battle_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SnapshotResp) GetMap() *MapView {
@@ -2446,7 +2558,7 @@ type CountsReq struct {
 
 func (x *CountsReq) Reset() {
 	*x = CountsReq{}
-	mi := &file_battle_proto_msgTypes[34]
+	mi := &file_battle_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2458,7 +2570,7 @@ func (x *CountsReq) String() string {
 func (*CountsReq) ProtoMessage() {}
 
 func (x *CountsReq) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[34]
+	mi := &file_battle_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2471,7 +2583,7 @@ func (x *CountsReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CountsReq.ProtoReflect.Descriptor instead.
 func (*CountsReq) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{34}
+	return file_battle_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *CountsReq) GetMapId() string {
@@ -2493,7 +2605,7 @@ type CountsResp struct {
 
 func (x *CountsResp) Reset() {
 	*x = CountsResp{}
-	mi := &file_battle_proto_msgTypes[35]
+	mi := &file_battle_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2505,7 +2617,7 @@ func (x *CountsResp) String() string {
 func (*CountsResp) ProtoMessage() {}
 
 func (x *CountsResp) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[35]
+	mi := &file_battle_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2518,7 +2630,7 @@ func (x *CountsResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CountsResp.ProtoReflect.Descriptor instead.
 func (*CountsResp) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{35}
+	return file_battle_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *CountsResp) GetPlayers() int32 {
@@ -2558,7 +2670,7 @@ type CheckpointReq struct {
 
 func (x *CheckpointReq) Reset() {
 	*x = CheckpointReq{}
-	mi := &file_battle_proto_msgTypes[36]
+	mi := &file_battle_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2570,7 +2682,7 @@ func (x *CheckpointReq) String() string {
 func (*CheckpointReq) ProtoMessage() {}
 
 func (x *CheckpointReq) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[36]
+	mi := &file_battle_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2583,7 +2695,7 @@ func (x *CheckpointReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckpointReq.ProtoReflect.Descriptor instead.
 func (*CheckpointReq) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{36}
+	return file_battle_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *CheckpointReq) GetMapId() string {
@@ -2602,7 +2714,7 @@ type CheckpointResp struct {
 
 func (x *CheckpointResp) Reset() {
 	*x = CheckpointResp{}
-	mi := &file_battle_proto_msgTypes[37]
+	mi := &file_battle_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2614,7 +2726,7 @@ func (x *CheckpointResp) String() string {
 func (*CheckpointResp) ProtoMessage() {}
 
 func (x *CheckpointResp) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[37]
+	mi := &file_battle_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2627,7 +2739,7 @@ func (x *CheckpointResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckpointResp.ProtoReflect.Descriptor instead.
 func (*CheckpointResp) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{37}
+	return file_battle_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *CheckpointResp) GetCheckpoint() *MapCheckpoint {
@@ -2653,7 +2765,7 @@ type MapCheckpoint struct {
 
 func (x *MapCheckpoint) Reset() {
 	*x = MapCheckpoint{}
-	mi := &file_battle_proto_msgTypes[38]
+	mi := &file_battle_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2665,7 +2777,7 @@ func (x *MapCheckpoint) String() string {
 func (*MapCheckpoint) ProtoMessage() {}
 
 func (x *MapCheckpoint) ProtoReflect() protoreflect.Message {
-	mi := &file_battle_proto_msgTypes[38]
+	mi := &file_battle_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2678,7 +2790,7 @@ func (x *MapCheckpoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MapCheckpoint.ProtoReflect.Descriptor instead.
 func (*MapCheckpoint) Descriptor() ([]byte, []int) {
-	return file_battle_proto_rawDescGZIP(), []int{38}
+	return file_battle_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *MapCheckpoint) GetMapId() string {
@@ -2900,7 +3012,14 @@ const file_battle_proto_rawDesc = "" +
 	"\aPingReq\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\x1a\n" +
 	"\bPingResp\x12\x0e\n" +
-	"\x02ts\x18\x01 \x01(\x03R\x02ts\"\x13\n" +
+	"\x02ts\x18\x01 \x01(\x03R\x02ts\"B\n" +
+	"\rAttackBossReq\x12\x15\n" +
+	"\x06map_id\x18\x01 \x01(\tR\x05mapId\x12\x1a\n" +
+	"\busername\x18\x02 \x01(\tR\busername\"_\n" +
+	"\x0eAttackBossResp\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12)\n" +
+	"\aprofile\x18\x02 \x01(\v2\x0f.pb.UserProfileR\aprofile\x12\x0e\n" +
+	"\x02ok\x18\x03 \x01(\bR\x02ok\"\x13\n" +
 	"\x11BackgroundStepReq\";\n" +
 	"\x12BackgroundStepResp\x12%\n" +
 	"\x06events\x18\x01 \x03(\v2\r.pb.MapEventsR\x06events\":\n" +
@@ -2969,7 +3088,7 @@ const file_battle_proto_rawDesc = "" +
 	"checkpoint2<\n" +
 	"\x0eGatewayService\x12*\n" +
 	"\n" +
-	"GameStream\x12\v.pb.Message\x1a\v.pb.Message(\x010\x012\xff\x04\n" +
+	"GameStream\x12\v.pb.Message\x1a\v.pb.Message(\x010\x012\xb4\x05\n" +
 	"\vNodeService\x12!\n" +
 	"\x04Ping\x12\v.pb.PingReq\x1a\f.pb.PingResp\x120\n" +
 	"\tAddPlayer\x12\x10.pb.AddPlayerReq\x1a\x11.pb.AddPlayerResp\x129\n" +
@@ -2985,7 +3104,9 @@ const file_battle_proto_rawDesc = "" +
 	"\x06Counts\x12\r.pb.CountsReq\x1a\x0e.pb.CountsResp\x123\n" +
 	"\n" +
 	"Checkpoint\x12\x11.pb.CheckpointReq\x1a\x12.pb.CheckpointResp\x12?\n" +
-	"\x0eBackgroundStep\x12\x15.pb.BackgroundStepReq\x1a\x16.pb.BackgroundStepRespB\x10Z\x0ebattleworld/pbb\x06proto3"
+	"\x0eBackgroundStep\x12\x15.pb.BackgroundStepReq\x1a\x16.pb.BackgroundStepResp\x123\n" +
+	"\n" +
+	"AttackBoss\x12\x11.pb.AttackBossReq\x1a\x12.pb.AttackBossRespB\x10Z\x0ebattleworld/pbb\x06proto3"
 
 var (
 	file_battle_proto_rawDescOnce sync.Once
@@ -2999,7 +3120,7 @@ func file_battle_proto_rawDescGZIP() []byte {
 	return file_battle_proto_rawDescData
 }
 
-var file_battle_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
+var file_battle_proto_msgTypes = make([]protoimpl.MessageInfo, 41)
 var file_battle_proto_goTypes = []any{
 	(*PlayerView)(nil),         // 0: pb.PlayerView
 	(*NPCView)(nil),            // 1: pb.NPCView
@@ -3022,24 +3143,26 @@ var file_battle_proto_goTypes = []any{
 	(*AttackResp)(nil),         // 18: pb.AttackResp
 	(*PingReq)(nil),            // 19: pb.PingReq
 	(*PingResp)(nil),           // 20: pb.PingResp
-	(*BackgroundStepReq)(nil),  // 21: pb.BackgroundStepReq
-	(*BackgroundStepResp)(nil), // 22: pb.BackgroundStepResp
-	(*MapEvents)(nil),          // 23: pb.MapEvents
-	(*HealReq)(nil),            // 24: pb.HealReq
-	(*HealResp)(nil),           // 25: pb.HealResp
-	(*BuyItemReq)(nil),         // 26: pb.BuyItemReq
-	(*BuyItemResp)(nil),        // 27: pb.BuyItemResp
-	(*ProfileReq)(nil),         // 28: pb.ProfileReq
-	(*ProfileResp)(nil),        // 29: pb.ProfileResp
-	(*RewardPlayerReq)(nil),    // 30: pb.RewardPlayerReq
-	(*RewardPlayerResp)(nil),   // 31: pb.RewardPlayerResp
-	(*SnapshotReq)(nil),        // 32: pb.SnapshotReq
-	(*SnapshotResp)(nil),       // 33: pb.SnapshotResp
-	(*CountsReq)(nil),          // 34: pb.CountsReq
-	(*CountsResp)(nil),         // 35: pb.CountsResp
-	(*CheckpointReq)(nil),      // 36: pb.CheckpointReq
-	(*CheckpointResp)(nil),     // 37: pb.CheckpointResp
-	(*MapCheckpoint)(nil),      // 38: pb.MapCheckpoint
+	(*AttackBossReq)(nil),      // 21: pb.AttackBossReq
+	(*AttackBossResp)(nil),     // 22: pb.AttackBossResp
+	(*BackgroundStepReq)(nil),  // 23: pb.BackgroundStepReq
+	(*BackgroundStepResp)(nil), // 24: pb.BackgroundStepResp
+	(*MapEvents)(nil),          // 25: pb.MapEvents
+	(*HealReq)(nil),            // 26: pb.HealReq
+	(*HealResp)(nil),           // 27: pb.HealResp
+	(*BuyItemReq)(nil),         // 28: pb.BuyItemReq
+	(*BuyItemResp)(nil),        // 29: pb.BuyItemResp
+	(*ProfileReq)(nil),         // 30: pb.ProfileReq
+	(*ProfileResp)(nil),        // 31: pb.ProfileResp
+	(*RewardPlayerReq)(nil),    // 32: pb.RewardPlayerReq
+	(*RewardPlayerResp)(nil),   // 33: pb.RewardPlayerResp
+	(*SnapshotReq)(nil),        // 34: pb.SnapshotReq
+	(*SnapshotResp)(nil),       // 35: pb.SnapshotResp
+	(*CountsReq)(nil),          // 36: pb.CountsReq
+	(*CountsResp)(nil),         // 37: pb.CountsResp
+	(*CheckpointReq)(nil),      // 38: pb.CheckpointReq
+	(*CheckpointResp)(nil),     // 39: pb.CheckpointResp
+	(*MapCheckpoint)(nil),      // 40: pb.MapCheckpoint
 }
 var file_battle_proto_depIdxs = []int32{
 	0,  // 0: pb.MapView.players:type_name -> pb.PlayerView
@@ -3056,49 +3179,52 @@ var file_battle_proto_depIdxs = []int32{
 	10, // 11: pb.RemovePlayerResp.profile:type_name -> pb.UserProfile
 	10, // 12: pb.MovePlayerResp.profile:type_name -> pb.UserProfile
 	10, // 13: pb.AttackResp.profile:type_name -> pb.UserProfile
-	23, // 14: pb.BackgroundStepResp.events:type_name -> pb.MapEvents
-	10, // 15: pb.HealResp.profile:type_name -> pb.UserProfile
-	10, // 16: pb.BuyItemResp.profile:type_name -> pb.UserProfile
-	10, // 17: pb.ProfileResp.profile:type_name -> pb.UserProfile
-	10, // 18: pb.RewardPlayerResp.profile:type_name -> pb.UserProfile
-	5,  // 19: pb.SnapshotResp.map:type_name -> pb.MapView
-	38, // 20: pb.CheckpointResp.checkpoint:type_name -> pb.MapCheckpoint
-	0,  // 21: pb.MapCheckpoint.players:type_name -> pb.PlayerView
-	1,  // 22: pb.MapCheckpoint.npcs:type_name -> pb.NPCView
-	2,  // 23: pb.MapCheckpoint.treasures:type_name -> pb.TreasureView
-	9,  // 24: pb.GatewayService.GameStream:input_type -> pb.Message
-	19, // 25: pb.NodeService.Ping:input_type -> pb.PingReq
-	11, // 26: pb.NodeService.AddPlayer:input_type -> pb.AddPlayerReq
-	13, // 27: pb.NodeService.RemovePlayer:input_type -> pb.RemovePlayerReq
-	15, // 28: pb.NodeService.MovePlayer:input_type -> pb.MovePlayerReq
-	17, // 29: pb.NodeService.Attack:input_type -> pb.AttackReq
-	24, // 30: pb.NodeService.Heal:input_type -> pb.HealReq
-	26, // 31: pb.NodeService.BuyItem:input_type -> pb.BuyItemReq
-	28, // 32: pb.NodeService.Profile:input_type -> pb.ProfileReq
-	30, // 33: pb.NodeService.RewardPlayer:input_type -> pb.RewardPlayerReq
-	32, // 34: pb.NodeService.Snapshot:input_type -> pb.SnapshotReq
-	34, // 35: pb.NodeService.Counts:input_type -> pb.CountsReq
-	36, // 36: pb.NodeService.Checkpoint:input_type -> pb.CheckpointReq
-	21, // 37: pb.NodeService.BackgroundStep:input_type -> pb.BackgroundStepReq
-	9,  // 38: pb.GatewayService.GameStream:output_type -> pb.Message
-	20, // 39: pb.NodeService.Ping:output_type -> pb.PingResp
-	12, // 40: pb.NodeService.AddPlayer:output_type -> pb.AddPlayerResp
-	14, // 41: pb.NodeService.RemovePlayer:output_type -> pb.RemovePlayerResp
-	16, // 42: pb.NodeService.MovePlayer:output_type -> pb.MovePlayerResp
-	18, // 43: pb.NodeService.Attack:output_type -> pb.AttackResp
-	25, // 44: pb.NodeService.Heal:output_type -> pb.HealResp
-	27, // 45: pb.NodeService.BuyItem:output_type -> pb.BuyItemResp
-	29, // 46: pb.NodeService.Profile:output_type -> pb.ProfileResp
-	31, // 47: pb.NodeService.RewardPlayer:output_type -> pb.RewardPlayerResp
-	33, // 48: pb.NodeService.Snapshot:output_type -> pb.SnapshotResp
-	35, // 49: pb.NodeService.Counts:output_type -> pb.CountsResp
-	37, // 50: pb.NodeService.Checkpoint:output_type -> pb.CheckpointResp
-	22, // 51: pb.NodeService.BackgroundStep:output_type -> pb.BackgroundStepResp
-	38, // [38:52] is the sub-list for method output_type
-	24, // [24:38] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	10, // 14: pb.AttackBossResp.profile:type_name -> pb.UserProfile
+	25, // 15: pb.BackgroundStepResp.events:type_name -> pb.MapEvents
+	10, // 16: pb.HealResp.profile:type_name -> pb.UserProfile
+	10, // 17: pb.BuyItemResp.profile:type_name -> pb.UserProfile
+	10, // 18: pb.ProfileResp.profile:type_name -> pb.UserProfile
+	10, // 19: pb.RewardPlayerResp.profile:type_name -> pb.UserProfile
+	5,  // 20: pb.SnapshotResp.map:type_name -> pb.MapView
+	40, // 21: pb.CheckpointResp.checkpoint:type_name -> pb.MapCheckpoint
+	0,  // 22: pb.MapCheckpoint.players:type_name -> pb.PlayerView
+	1,  // 23: pb.MapCheckpoint.npcs:type_name -> pb.NPCView
+	2,  // 24: pb.MapCheckpoint.treasures:type_name -> pb.TreasureView
+	9,  // 25: pb.GatewayService.GameStream:input_type -> pb.Message
+	19, // 26: pb.NodeService.Ping:input_type -> pb.PingReq
+	11, // 27: pb.NodeService.AddPlayer:input_type -> pb.AddPlayerReq
+	13, // 28: pb.NodeService.RemovePlayer:input_type -> pb.RemovePlayerReq
+	15, // 29: pb.NodeService.MovePlayer:input_type -> pb.MovePlayerReq
+	17, // 30: pb.NodeService.Attack:input_type -> pb.AttackReq
+	26, // 31: pb.NodeService.Heal:input_type -> pb.HealReq
+	28, // 32: pb.NodeService.BuyItem:input_type -> pb.BuyItemReq
+	30, // 33: pb.NodeService.Profile:input_type -> pb.ProfileReq
+	32, // 34: pb.NodeService.RewardPlayer:input_type -> pb.RewardPlayerReq
+	34, // 35: pb.NodeService.Snapshot:input_type -> pb.SnapshotReq
+	36, // 36: pb.NodeService.Counts:input_type -> pb.CountsReq
+	38, // 37: pb.NodeService.Checkpoint:input_type -> pb.CheckpointReq
+	23, // 38: pb.NodeService.BackgroundStep:input_type -> pb.BackgroundStepReq
+	21, // 39: pb.NodeService.AttackBoss:input_type -> pb.AttackBossReq
+	9,  // 40: pb.GatewayService.GameStream:output_type -> pb.Message
+	20, // 41: pb.NodeService.Ping:output_type -> pb.PingResp
+	12, // 42: pb.NodeService.AddPlayer:output_type -> pb.AddPlayerResp
+	14, // 43: pb.NodeService.RemovePlayer:output_type -> pb.RemovePlayerResp
+	16, // 44: pb.NodeService.MovePlayer:output_type -> pb.MovePlayerResp
+	18, // 45: pb.NodeService.Attack:output_type -> pb.AttackResp
+	27, // 46: pb.NodeService.Heal:output_type -> pb.HealResp
+	29, // 47: pb.NodeService.BuyItem:output_type -> pb.BuyItemResp
+	31, // 48: pb.NodeService.Profile:output_type -> pb.ProfileResp
+	33, // 49: pb.NodeService.RewardPlayer:output_type -> pb.RewardPlayerResp
+	35, // 50: pb.NodeService.Snapshot:output_type -> pb.SnapshotResp
+	37, // 51: pb.NodeService.Counts:output_type -> pb.CountsResp
+	39, // 52: pb.NodeService.Checkpoint:output_type -> pb.CheckpointResp
+	24, // 53: pb.NodeService.BackgroundStep:output_type -> pb.BackgroundStepResp
+	22, // 54: pb.NodeService.AttackBoss:output_type -> pb.AttackBossResp
+	40, // [40:55] is the sub-list for method output_type
+	25, // [25:40] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_battle_proto_init() }
@@ -3112,7 +3238,7 @@ func file_battle_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_battle_proto_rawDesc), len(file_battle_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   39,
+			NumMessages:   41,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

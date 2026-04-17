@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 
 	"battleworld/pb"
 	"battleworld/protocol"
@@ -110,6 +111,21 @@ func (c *NodeGRPCClient) BuyItem(ctx context.Context, mapID, username, item stri
 	return resp.Text, protocol.FromProtoUserProfile(resp.Profile), resp.Ok, nil
 }
 
+func (c *NodeGRPCClient) AttackBoss(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error) {
+	req := &pb.AttackBossReq{
+		MapId:    mapID,
+		Username: username,
+	}
+	resp, err := c.client.AttackBoss(ctx, req)
+	//fmt.Println("[debug] 任务失败 grpc_client.go，err:", err)
+	if err != nil {
+		fmt.Println("[debug] 任务失败 grpc_client.go，err:", err)
+		return "", protocol.UserProfile{}, false, err
+	}
+	fmt.Println("[debug] 任务成功 grpc_client.go，resp.ok:", resp.Ok)
+	return resp.Text, protocol.FromProtoUserProfile(resp.Profile), resp.Ok, nil
+}
+
 func (c *NodeGRPCClient) Profile(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error) {
 	req := &pb.ProfileReq{
 		MapId:    mapID,
@@ -198,8 +214,8 @@ func (c *NodeGRPCClient) BackgroundStep() []protocol.MapEvents {
 	return res
 }
 
-func (c *NodeGRPCClient) StoreReplica(cp protocol.MapCheckpoint)                           {}
-func (c *NodeGRPCClient) Promote(mapID string, cfg world.MapConfig) error                  { return nil }
-func (c *NodeGRPCClient) View() protocol.NodeView                                          { return protocol.NodeView{} }
-func (c *NodeGRPCClient) IsHealthy() bool                                                  { return true }
-func (c *NodeGRPCClient) SetHealthy(healthy bool) bool                                     { return true }
+func (c *NodeGRPCClient) StoreReplica(cp protocol.MapCheckpoint)          {}
+func (c *NodeGRPCClient) Promote(mapID string, cfg world.MapConfig) error { return nil }
+func (c *NodeGRPCClient) View() protocol.NodeView                         { return protocol.NodeView{} }
+func (c *NodeGRPCClient) IsHealthy() bool                                 { return true }
+func (c *NodeGRPCClient) SetHealthy(healthy bool) bool                    { return true }

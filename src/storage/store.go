@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"battleworld/protocol"
-
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -330,3 +330,68 @@ func (s *Store) GetAllGlobalSessions() ([]GlobalSession, error) {
 	}
 	return sessions, nil
 }
+
+func (s *Store) LoadGlobalBoss() (protocol.BossState, int32, error) {
+	ctx := s.ctx
+	hpStr, err := s.rdb.Get(ctx, "boss:global:hp").Result()
+	if err != nil {
+		if err == redis.Nil {
+			return protocol.BossState{}, 0, errors.New("boss state not initialized")
+		}
+		return protocol.BossState{}, 0, err
+	}
+	hp, err := strconv.ParseInt(hpStr, 10, 32)
+	if err != nil {
+		return protocol.BossState{}, 0, err
+	}
+
+	stateJson, err := s.rdb.Get(ctx, "boss:global:state").Result()
+	if err != nil {
+		return protocol.BossState{}, 0, err
+	}
+
+	var state protocol.BossState
+	err = json.Unmarshal([]byte(stateJson), &state)
+	return state, int32(hp), err
+}
+
+func (s *Store) InitGlobalBoss(hp int32, state protocol.BossState) error {
+	ctx := s.ctx
+	stateJson, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	pipe := s.rdb.TxPipeline()
+	pipe.Set(ctx, "boss:global:hp", hp, 0)
+	pipe.Set(ctx, "boss:global:state", stateJson, 0)
+	_, err = pipe.Exec(ctx)
+	return err
+}
+
+func (s *Store) SaveGlobalBoss(state protocol.BossState) error {
+	ctx := s.ctx
+	stateJson, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	return s.rdb.Set(ctx, "boss:global:state", stateJson, 0).Err()
+}
+
+func (s *Store) DecrGlobalBossHP(username string, damage int) (int32, error) {
+	ctx := s.ctx
+	newHp, err := s.rdb.DecrBy(ctx, "boss:global:hp", int64(damage)).Result()
+	return int32(newHp), err
+}
+
+func (s *Store) TryLockBossKill() bool {
+	ctx := s.ctx
+	ok, err := s.rdb.SetNX(ctx, "boss:global:kill_lock", true, 15*time.Second).Result()
+	return err == nil && ok
+}
+
+func (s *Store) TryLockBossRespawn() bool {
+	ctx := s.ctx
+	ok, err := s.rdb.SetNX(ctx, "boss:global:respawn_lock", true, 10*time.Second).Result()
+	return err == nil && ok
+}
+

@@ -23,18 +23,6 @@ type Session struct {
 	Version  int64
 }
 
-type BossState struct {
-	Name         string
-	HP           int
-	MaxHP        int
-	Alive        bool
-	LastHit      string
-	RespawnAt    time.Time
-	Sites        []protocol.BossSite
-	Version      int64
-	Contributors map[string]int
-}
-
 // NodeClient 代表向一个节点发起命令的客户端抽象，允许未来替换成网络版 (NodeGRPCClient)
 type NodeClient interface {
 	NodeID() string
@@ -50,6 +38,7 @@ type NodeClient interface {
 	Attack(ctx context.Context, mapID, username string) (string, string, string, protocol.UserProfile, bool, error)
 	Heal(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error)
 	BuyItem(ctx context.Context, mapID, username, item string) (string, protocol.UserProfile, bool, error)
+	AttackBoss(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error)
 	Profile(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error)
 	RewardPlayer(ctx context.Context, mapID, username string, treasureDelta, victoryDelta int) (protocol.UserProfile, bool, error)
 	Snapshot(ctx context.Context, mapID string) (protocol.MapView, error)
@@ -70,7 +59,6 @@ type Cluster struct {
 	owners   map[string]string          //key==mapID
 	replicas map[string]string          //..
 	configs  map[string]world.MapConfig //..
-	boss     *BossState
 	stopCh   chan struct{}
 }
 
@@ -83,14 +71,24 @@ func NewCluster(store *storage.Store) (*Cluster, error) {
 		owners:   make(map[string]string),
 		replicas: make(map[string]string),
 		configs:  make(map[string]world.MapConfig),
-		boss:     newBossState(),
 		stopCh:   make(chan struct{}),
 	}
 
 	for _, cfg := range world.AvailableMaps() {
 		c.configs[cfg.ID] = cfg
 	}
-	c.boss.Sites = c.buildBossSites()
+
+	// 从Redis加载Boss状态，如果没找到则初始化
+	if _, _, err := store.LoadGlobalBoss(); err != nil {
+		initialState := protocol.BossState{
+			Name:      "王子文",
+			Alive:     true,
+			Sites:     c.buildBossSites(),
+			Version:   1,
+			AttackGap: 2000,
+		}
+		store.InitGlobalBoss(1600, initialState)
+	}
 
 	// 拓扑结构不再硬编码，而是由 discoveryLoop 动态从 Redis 发现节点并接管
 	return c, nil
@@ -106,7 +104,7 @@ func (c *Cluster) Start() error {
 	go c.backgroundLoop()
 	go c.heartbeatLoop()
 	go c.checkpointLoop()
-	go c.flushLoop()
+	//go c.flushLoop()
 	return nil
 }
 func (c *Cluster) Close() {
@@ -330,92 +328,25 @@ func (c *Cluster) BuyItem(username, item string) (*protocol.WorldState, error) {
 	return c.SnapshotFor(username)
 }
 func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
-	// TODO(Lab3-1):
-	// 这里需要把“世界首领”做成跨地图、跨节点共享的全局热状态。
-	// 要求至少完成：
 	session, node, err := c.sessionNode(username)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("[debug] 任务下发至node")
+	event, _, ok, err := node.AttackBoss(context.Background(), session.MapID, username)
+	if err != nil || !ok {
+		//fmt.Println("[debug] 任务失败，c.attackboss,err:", err)
+		return nil, err
+	}
+	fmt.Println("[debug] 任务正常结束，event:", event)
+	c.broadcastGlobalEvent(event)
 
-	profile, ok, err := node.Profile(context.Background(), session.MapID, username)
-	if err != nil {
-		return nil, fmt.Errorf("节点RPC获取Profile异常: %v", err)
-	}
-	if !profile.Alive {
-		return nil, errors.New("倒地时无法攻击")
-	}
-	if !ok {
-		return nil, errors.New("获取玩家profile失败")
-	}
-
-	c.mu.RLock()
-	if !c.boss.Alive {
-		c.mu.RUnlock()
-		return nil, errors.New("等待首领复活")
+	if strings.Contains(event, "已经死亡！终结者：") {
+		bState, _, _ := c.store.LoadGlobalBoss()
+		go c.respawnBossAfterCooldown(bState.Name)
 	}
 
-	bossSite, ok := c.bossSite(session.MapID)
-	if !ok {
-		c.mu.RUnlock()
-		return nil, errors.New("当前地图没有首领投影")
-	}
-
-	// 1. 校验玩家和当前地图的首领投影距离，太远则拒绝攻击。
-	if manhattan(bossSite.X, bossSite.Y, profile.X, profile.Y) > protocol.BossAtkRange {
-		c.mu.RUnlock()
-		return nil, fmt.Errorf("首领在范围外,剩余HP:%d", c.boss.HP)
-	}
-	// 2. 对全局首领 HP 做单写者更新，避免多个节点并发扣血产生不一致。
-	c.mu.RUnlock()
-	damadge := profile.Attack
-	c.mu.Lock()
-	c.boss.HP -= damadge
-	c.boss.Contributors[username] += damadge
-	if c.boss.HP <= 0 {
-
-		c.boss.Alive = false
-		//c.boss.Contributors[username] -= (damadge - c.boss.HP)
-		c.boss.HP = 0
-		c.boss.LastHit = username
-		c.broadcastGlobalEventLocked(fmt.Sprintf("boss:%q,已经死亡！终结者：%q", c.boss.Name, username))
-		go c.respawnBossAfterCooldown()
-	}
-
-	bossTmp := c.boss
-	c.mu.Unlock()
-
-	c.broadcastGlobalEvent(fmt.Sprintf("%q 对 %q 造成了 %d 点伤害！剩余HP：%d", username, bossTmp.Name, damadge, bossTmp.HP))
-	if !bossTmp.Alive {
-
-		//奖励参与者
-		for name, con := range bossTmp.Contributors {
-			c.mu.RLock()
-			session, ok := c.store.LoadGlobalSession(name)
-			c.mu.RUnlock()
-			if !ok {
-				continue
-			}
-			profile, ok, err := node.RewardPlayer(context.Background(), session.MapID, name, con, con) //,name,contri,contri)
-			if err != nil {
-				fmt.Printf("[ERROR] RPC RewardPlayer 异常: %v\n", err)
-			} else if ok {
-				c.pushEvent(name, "您参与了boss攻略战！")
-				profile.LastNode = session.NodeID
-				profile.LastMap = session.MapID
-				_ = c.store.SaveProfile(profile)
-				// _ = c.persistSessionState(name)
-			}
-		}
-	}
-	// profile.LastNode = session.NodeID
-	// profile.LastMap = session.MapID
-	// _ = c.store.SaveProfile(profile)
-	// _ = c.persistSessionState(username)
 	return c.SnapshotFor(username)
-	// 3. 首领死亡时，给所有参与玩家统一结算奖励，并安排复活。
-	// 4. 将结果广播到所有在线会话，而不是只发给当前地图。
-	//return nil, studentTODOError("Lab3-1", "cluster.AttackBoss", "完成全服共享世界首领的协同结算")
 }
 
 func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, error) {
@@ -512,7 +443,6 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	node := c.nodes[session.NodeID]
 	sessionVersion := session.Version
 	events := append([]string(nil), session.Events...)
-	boss := c.boss.viewLocked()
 	owners := make(map[string]string, len(c.owners))
 	for k, v := range c.owners {
 		owners[k] = v
@@ -522,6 +452,26 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 		nodes[k] = v
 	}
 	c.mu.RUnlock()
+
+	bState, hp, _ := c.store.LoadGlobalBoss()
+	respawnIn := 0
+	if !bState.Alive {
+		respawnIn = int(time.Until(bState.RespawnAt).Seconds())
+		if respawnIn < 1 {
+			respawnIn = 1
+		}
+	}
+	bossView := protocol.BossView{
+		Name:      bState.Name,
+		HP:        int(hp),
+		MaxHP:     1600,
+		Alive:     bState.Alive,
+		LastHit:   bState.LastHit,
+		RespawnIn: respawnIn,
+		AttackGap: bState.AttackGap,
+		Sites:     bState.Sites,
+		Version:   bState.Version,
+	}
 
 	if node == nil {
 		return nil, errors.New("当前承载节点已不可用")
@@ -587,7 +537,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	ws.Map = mapView
 	ws.Maps = mapBriefs
 	ws.Nodes = nodeViews
-	ws.Boss = boss
+	ws.Boss = bossView
 	ws.Events = events
 	ws.SessionVersion = sessionVersion
 
@@ -717,14 +667,21 @@ func (c *Cluster) persistSessionState(username string) error {
 	return nil //studentTODOError("Lab3-3", "cluster.persistSessionState", "完成会话热数据与用户冷数据持久化")
 }
 
-func (c *Cluster) respawnBossAfterCooldown() {
+func (c *Cluster) respawnBossAfterCooldown(name string) {
 	time.Sleep(15 * time.Second)
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.boss = newBossState()
-	c.broadcastGlobalEventLocked(fmt.Sprintf("世界首领【%s】重新降临，所有服务器均可参与讨伐", c.boss.Name))
+	bState, hp, err := c.store.LoadGlobalBoss()
+	if err == nil && !bState.Alive {
+		if c.store.TryLockBossRespawn() {
+			bState.Alive = true
+			bState.LastHit = ""
+			if hp <= 0 {
+				hp = 1600
+			}
+			c.store.InitGlobalBoss(hp, bState)
+			c.broadcastGlobalEvent(fmt.Sprintf("世界首领【%s】重新降临，所有服务器均可参与讨伐", name))
+		}
+	}
 }
 
 func (c *Cluster) discoveryLoop() {
@@ -1067,17 +1024,6 @@ func (c *Cluster) recoverNode(nodeID string) (string, error) {
 	return fmt.Sprintf("节点 %s 已恢复，最新快照已重新装载", nodeID), nil
 }
 
-func (c *Cluster) bossSite(mapID string) (protocol.BossSite, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	for _, site := range c.boss.Sites {
-		if site.MapID == mapID {
-			return site, true
-		}
-	}
-	return protocol.BossSite{}, false
-}
-
 func (c *Cluster) buildBossSites() []protocol.BossSite {
 	mapIDs := make([]string, 0, len(c.configs))
 	for mapID := range c.configs {
@@ -1095,50 +1041,6 @@ func (c *Cluster) buildBossSites() []protocol.BossSite {
 		})
 	}
 	return sites
-}
-
-func newBossState() *BossState {
-	return &BossState{
-		Name:  "王子文",
-		HP:    1600,
-		MaxHP: 1600,
-		Alive: true,
-		Sites: []protocol.BossSite{ //考虑到随后的初始化，这里值为空也可以？
-			{MapID: "green", X: 50, Y: 20},
-			{MapID: "cave", X: 49, Y: 20},
-			{MapID: "ruins", X: 50, Y: 20},
-		},
-		Version:      1,
-		Contributors: make(map[string]int),
-	}
-}
-
-func (b *BossState) viewLocked() protocol.BossView {
-	respawnIn := 0
-	if !b.Alive {
-		respawnIn = int(time.Until(b.RespawnAt).Seconds())
-		if respawnIn < 1 {
-			respawnIn = 1
-		}
-	}
-	return protocol.BossView{
-		Name:      b.Name,
-		HP:        b.HP,
-		MaxHP:     b.MaxHP,
-		Alive:     b.Alive,
-		LastHit:   b.LastHit,
-		RespawnIn: respawnIn,
-		AttackGap: protocol.BossAtkRange,
-		Sites:     append([]protocol.BossSite(nil), b.Sites...),
-		Version:   b.Version,
-	}
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func manhattan(ax, ay, bx, by int) int {
