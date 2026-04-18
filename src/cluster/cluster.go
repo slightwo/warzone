@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -342,13 +341,13 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("[debug] 任务下发至node")
+	//fmt.Println("[debug] 任务下发至node")
 	event, _, ok, err := node.AttackBoss(context.Background(), session.MapID, username)
 	if err != nil || !ok {
 		//fmt.Println("[debug] 任务失败，c.attackboss,err:", err)
 		return nil, err
 	}
-	fmt.Println("[debug] 任务正常结束，event:", event)
+	//fmt.Println("[debug] 任务正常结束，event:", event)
 	c.broadcastGlobalEvent(event)
 
 	if strings.Contains(event, "已经死亡！终结者：") {
@@ -423,10 +422,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 		session.Version++
 		_ = c.store.SaveGlobalSession(*session)
 	}
-	// c.mu.RLock()
-	// currentSession, _ := c.store.LoadGlobalSession(username)
-	// fmt.Printf("[DEBUG] Session 更新后: MapID=%s, NodeID=%s, Version=%d\n",
-	// 	currentSession.MapID, currentSession.NodeID, currentSession.Version)
+
 	c.mu.Unlock()
 
 	if ok && session != nil {
@@ -455,7 +451,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	//to under
 	c.eventMu.RLock()
 	var allEvents []string
-	fmt.Println("[debug]", c.globalEvents)
+	//fmt.Println("[debug]", c.globalEvents)
 	allEvents = append(allEvents, c.globalEvents...)
 	if list, ok := c.mapEvents[session.MapID]; ok {
 		allEvents = append(allEvents, list...)
@@ -988,18 +984,6 @@ func manhattan(ax, ay, bx, by int) int {
 	return dx + dy
 }
 
-func studentTODOError(label, funcName, detail string) error {
-	logStudentTODO(label, funcName, detail)
-	return fmt.Errorf("[%s] TODO 未实现：%s，需要%s", label, funcName, detail)
-}
-
-func logStudentTODO(label, funcName, detail string) {
-	if _, loaded := studentTodoNotice.LoadOrStore(label, struct{}{}); loaded {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "[%s] student 待实现函数被触发：%s，需要%s\n", label, funcName, detail)
-}
-
 func (c *Cluster) eventLoop() {
 	//to under
 	ch := c.pubsub.Channel()
@@ -1011,13 +995,13 @@ func (c *Cluster) eventLoop() {
 			}
 			c.eventMu.Lock()
 			if msg.Channel == "events:global" {
-				fmt.Println("[debug]收到全局消息")
+				//fmt.Println("[debug]收到全局消息")
 				c.globalEvents = append(c.globalEvents, msg.Payload)
 				if len(c.globalEvents) > 3 {
 					c.globalEvents = c.globalEvents[len(c.globalEvents)-3:]
 				}
 			} else if strings.HasPrefix(msg.Channel, "events:map:") {
-				fmt.Println("[debug]收到map消息")
+				//fmt.Println("[debug]收到map消息")
 				mapID := strings.TrimPrefix(msg.Channel, "events:map:")
 				buf := append(c.mapEvents[mapID], msg.Payload)
 				if len(buf) > 3 {

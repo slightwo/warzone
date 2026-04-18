@@ -122,7 +122,7 @@ func (c *NodeGRPCClient) AttackBoss(ctx context.Context, mapID, username string)
 		fmt.Println("[debug] 任务失败 grpc_client.go，err:", err)
 		return "", protocol.UserProfile{}, false, err
 	}
-	fmt.Println("[debug] 任务成功 grpc_client.go，resp.ok:", resp.Ok)
+	//fmt.Println("[debug] 任务成功 grpc_client.go，resp.ok:", resp.Ok)
 	return resp.Text, protocol.FromProtoUserProfile(resp.Profile), resp.Ok, nil
 }
 

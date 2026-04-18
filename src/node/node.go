@@ -168,7 +168,7 @@ func (n *NodeService) RemovePlayer(ctx context.Context, mapID, username string) 
 }
 
 func (n *NodeService) MovePlayer(ctx context.Context, mapID, username, dir string) (string, protocol.UserProfile, bool, error) {
-	fmt.Println("[debug] node.go:move")
+	//fmt.Println("[debug] node.go:move")
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
