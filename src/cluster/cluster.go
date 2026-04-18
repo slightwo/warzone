@@ -13,6 +13,8 @@ import (
 	"battleworld/protocol"
 	"battleworld/storage"
 	"battleworld/world"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type Session struct {
@@ -60,18 +62,27 @@ type Cluster struct {
 	replicas map[string]string          //..
 	configs  map[string]world.MapConfig //..
 	stopCh   chan struct{}
+
+	// to understand事件分离：纯内存通道，各个无状态网关实例自行订阅并缓冲
+	eventMu      sync.RWMutex
+	globalEvents []string
+	mapEvents    map[string][]string
+	userEvents   map[string][]string
+	pubsub       *redis.PubSub
 }
 
 var studentTodoNotice sync.Map
 
 func NewCluster(store *storage.Store) (*Cluster, error) {
 	c := &Cluster{
-		store:    store,
-		nodes:    make(map[string]NodeClient),
-		owners:   make(map[string]string),
-		replicas: make(map[string]string),
-		configs:  make(map[string]world.MapConfig),
-		stopCh:   make(chan struct{}),
+		store:      store,
+		nodes:      make(map[string]NodeClient),
+		owners:     make(map[string]string),
+		replicas:   make(map[string]string),
+		configs:    make(map[string]world.MapConfig),
+		stopCh:     make(chan struct{}),
+		mapEvents:  make(map[string][]string), //to understand
+		userEvents: make(map[string][]string), //
 	}
 
 	for _, cfg := range world.AvailableMaps() {
@@ -91,6 +102,8 @@ func NewCluster(store *storage.Store) (*Cluster, error) {
 	}
 
 	// 拓扑结构不再硬编码，而是由 discoveryLoop 动态从 Redis 发现节点并接管
+	c.pubsub = store.SubscribeEvents()
+	go c.eventLoop()
 	return c, nil
 }
 
@@ -104,7 +117,6 @@ func (c *Cluster) Start() error {
 	go c.backgroundLoop()
 	go c.heartbeatLoop()
 	go c.checkpointLoop()
-	//go c.flushLoop()
 	return nil
 }
 func (c *Cluster) Close() {
@@ -207,15 +219,13 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 		MapID:    mapID,
 		NodeID:   ownerID,
 		Version:  1,
-		Events: []string{
-			fmt.Sprintf("欢迎回来，%s", username),
-			fmt.Sprintf("当前地图 %s 由 %s 承载", mapID, ownerID),
-		},
 	}
 	_ = c.store.SaveGlobalSession(session)
 	c.mu.Unlock()
+	//to under
+	_ = c.store.PublishEvent("events:user:"+username, fmt.Sprintf("欢迎回来，%s", username))
+	_ = c.store.PublishEvent("events:user:"+username, fmt.Sprintf("当前地图 %s 由 %s 承载", mapID, ownerID))
 
-	_ = c.persistSessionState(username)
 	return c.SnapshotFor(username)
 }
 
@@ -324,7 +334,7 @@ func (c *Cluster) BuyItem(username, item string) (*protocol.WorldState, error) {
 	profile.LastNode = session.NodeID
 	profile.LastMap = session.MapID
 	_ = c.store.SaveProfile(profile)
-	_ = c.persistSessionState(username)
+	// _ = c.persistSessionState(username) // Removed
 	return c.SnapshotFor(username)
 }
 func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
@@ -423,7 +433,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 		c.pushEventLocked(session, fmt.Sprintf("切换到地图 %s", targetMap))
 	}
 	_ = c.store.SaveProfile(profile)
-	_ = c.persistSessionState(username)
+	// _ = c.persistSessionState(username) // Removed
 
 	return c.SnapshotFor(username)
 	// 1. 从源节点摘除玩家热状态。
@@ -442,7 +452,24 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	}
 	node := c.nodes[session.NodeID]
 	sessionVersion := session.Version
-	events := append([]string(nil), session.Events...)
+	//to under
+	c.eventMu.RLock()
+	var allEvents []string
+	fmt.Println("[debug]", c.globalEvents)
+	allEvents = append(allEvents, c.globalEvents...)
+	if list, ok := c.mapEvents[session.MapID]; ok {
+		allEvents = append(allEvents, list...)
+	}
+	if list, ok := c.userEvents[username]; ok {
+		allEvents = append(allEvents, list...)
+	}
+	c.eventMu.RUnlock()
+	// 取最近不超过 8 条的事件
+	if len(allEvents) > 8 {
+		allEvents = allEvents[len(allEvents)-8:]
+	}
+	events := allEvents
+	//
 	owners := make(map[string]string, len(c.owners))
 	for k, v := range c.owners {
 		owners[k] = v
@@ -564,107 +591,37 @@ func (c *Cluster) pushEvent(username, event string) {
 	if event == "" {
 		return
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	session, ok := c.store.LoadGlobalSession(username)
-	if !ok {
-		return
-	}
-	c.pushEventLocked(session, event)
+	// to under
+	_ = c.store.PublishEvent("events:user:"+username, event)
 }
 
+// to under
 func (c *Cluster) pushEventLocked(session *storage.GlobalSession, event string) {
-	session.Events = append(session.Events, event)
-	if len(session.Events) > 8 {
-		session.Events = session.Events[len(session.Events)-8:]
+	if event == "" {
+		return
 	}
-	session.Version++
-	_ = c.store.SaveGlobalSession(*session)
+	_ = c.store.PublishEvent("events:user:"+session.Username, event)
 }
 
 func (c *Cluster) broadcastGlobalEvent(event string) {
 	if event == "" {
 		return
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.broadcastGlobalEventLocked(event)
+	_ = c.store.PublishEvent("events:global", event)
 }
 
 func (c *Cluster) broadcastGlobalEventLocked(event string) {
-	sessions, _ := c.store.GetAllGlobalSessions()
-	for _, session := range sessions {
-		c.pushEventLocked(&session, event)
+	if event == "" {
+		return
 	}
+	_ = c.store.PublishEvent("events:global", event)
 }
 
 func (c *Cluster) broadcastMapEvent(mapID, event string) {
 	if event == "" {
 		return
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	sessions, _ := c.store.GetAllGlobalSessions()
-	for _, session := range sessions {
-		if session.MapID == mapID {
-			c.pushEventLocked(&session, event)
-		}
-	}
-}
-
-func (c *Cluster) persistSessionState(username string) error {
-	// TODO(Lab3-3):
-	// 这里负责把玩家当前热状态写回存储。
-	// 建议区分：
-	//首先从session获取必要的信息
-	c.mu.RLock()
-	session, ok := c.store.LoadGlobalSession(username)
-
-	if !ok {
-		c.mu.RUnlock()
-		return nil
-	}
-	node, ok := c.nodes[session.NodeID]
-	c.mu.RUnlock()
-	if node == nil {
-		return nil
-	}
-
-	profile, ok, err := node.Profile(context.Background(), session.MapID, username)
-	if err != nil {
-		return fmt.Errorf("节点RPC获取Profile异常: %v", err)
-	}
-	if !ok {
-		return nil
-	}
-	hotData := &protocol.HotSession{
-		Username:       username,
-		MapID:          session.MapID,
-		NodeID:         session.NodeID,
-		X:              profile.X,
-		Y:              profile.Y,
-		HP:             profile.HP,
-		Treasures:      profile.Treasures,
-		SessionVersion: session.Version,
-		UpdatedAt:      time.Now(),
-	}
-	// profile.LastMap = session.MapID
-	// profile.LastNode = session.NodeID
-	// if err := c.store.SaveProfile(profile); err != nil {
-	// 	return err
-	// }
-	if err := c.store.SaveHotSession(*hotData); err != nil {
-		return err
-	}
-	// 1. 冷数据：账号、密码哈希、历史战绩、最近退出位置。
-	// 2. 热数据：当前地图、节点、坐标、生命值、会话版本。
-	// 注意持久化时机，避免因为节点故障导致最新状态丢失。
-	return nil //studentTODOError("Lab3-3", "cluster.persistSessionState", "完成会话热数据与用户冷数据持久化")
+	_ = c.store.PublishEvent("events:map:"+mapID, event)
 }
 
 func (c *Cluster) respawnBossAfterCooldown(name string) {
@@ -861,30 +818,6 @@ func (c *Cluster) checkpointLoop() {
 
 }
 
-func (c *Cluster) flushLoop() {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			c.mu.RLock()
-			sessions, _ := c.store.GetAllGlobalSessions()
-			usernames := make([]string, 0, len(sessions))
-			for _, s := range sessions {
-				usernames = append(usernames, s.Username)
-			}
-			c.mu.RUnlock()
-
-			for _, username := range usernames {
-				_ = c.persistSessionState(username)
-			}
-		case <-c.stopCh:
-			return
-		}
-	}
-}
-
 func (c *Cluster) handleNodeFailure(nodeID string) {
 	// TODO(Lab3-5):
 	// 这里需要完成“主节点故障 -> 副本提升 -> 会话重路由”。
@@ -1065,4 +998,44 @@ func logStudentTODO(label, funcName, detail string) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "[%s] student 待实现函数被触发：%s，需要%s\n", label, funcName, detail)
+}
+
+func (c *Cluster) eventLoop() {
+	//to under
+	ch := c.pubsub.Channel()
+	for {
+		select {
+		case msg := <-ch:
+			if msg == nil {
+				continue
+			}
+			c.eventMu.Lock()
+			if msg.Channel == "events:global" {
+				fmt.Println("[debug]收到全局消息")
+				c.globalEvents = append(c.globalEvents, msg.Payload)
+				if len(c.globalEvents) > 3 {
+					c.globalEvents = c.globalEvents[len(c.globalEvents)-3:]
+				}
+			} else if strings.HasPrefix(msg.Channel, "events:map:") {
+				fmt.Println("[debug]收到map消息")
+				mapID := strings.TrimPrefix(msg.Channel, "events:map:")
+				buf := append(c.mapEvents[mapID], msg.Payload)
+				if len(buf) > 3 {
+					buf = buf[len(buf)-3:]
+				}
+				c.mapEvents[mapID] = buf
+			} else if strings.HasPrefix(msg.Channel, "events:user:") {
+				username := strings.TrimPrefix(msg.Channel, "events:user:")
+				buf := append(c.userEvents[username], msg.Payload)
+				if len(buf) > 2 {
+					buf = buf[len(buf)-2:]
+				}
+				c.userEvents[username] = buf
+			}
+			c.eventMu.Unlock()
+		case <-c.stopCh:
+			c.pubsub.Close()
+			return
+		}
+	}
 }

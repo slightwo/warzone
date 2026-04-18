@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"battleworld/protocol"
+
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -284,11 +285,10 @@ func (s *Store) GetActiveNodes() ([]NodeRegistryInfo, error) {
 }
 
 type GlobalSession struct {
-	Username string   `json:"username"`
-	MapID    string   `json:"map_id"`
-	NodeID   string   `json:"node_id"`
-	Events   []string `json:"events"`
-	Version  int64    `json:"version"`
+	Username string `json:"username"`
+	MapID    string `json:"map_id"`
+	NodeID   string `json:"node_id"`
+	Version  int64  `json:"version"`
 }
 
 func (s *Store) SaveGlobalSession(session GlobalSession) error {
@@ -329,6 +329,19 @@ func (s *Store) GetAllGlobalSessions() ([]GlobalSession, error) {
 		}
 	}
 	return sessions, nil
+}
+
+// to under
+// PublishEvent sends a message to a specific pub/sub channel.
+func (s *Store) PublishEvent(channel, event string) error {
+	return s.rdb.Publish(s.ctx, channel, event).Err()
+}
+
+// SubscribeEvents subscribes to all relevant event channels and returns the message channel.
+func (s *Store) SubscribeEvents() *redis.PubSub {
+	pubsub := s.rdb.Subscribe(s.ctx, "events:global")
+	pubsub.PSubscribe(s.ctx, "events:map:*", "events:user:*")
+	return pubsub
 }
 
 func (s *Store) LoadGlobalBoss() (protocol.BossState, int32, error) {
@@ -394,4 +407,3 @@ func (s *Store) TryLockBossRespawn() bool {
 	ok, err := s.rdb.SetNX(ctx, "boss:global:respawn_lock", true, 10*time.Second).Result()
 	return err == nil && ok
 }
-

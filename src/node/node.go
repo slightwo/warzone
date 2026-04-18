@@ -24,6 +24,7 @@ type NodeService struct {
 	maps             map[string]*world.World
 	replicaSnapshots map[string]protocol.MapCheckpoint
 	ln               net.Listener
+	stopCh           chan struct{}
 }
 
 func NewNodeService(id, addr string, store *storage.Store) *NodeService {
@@ -35,6 +36,7 @@ func NewNodeService(id, addr string, store *storage.Store) *NodeService {
 		lastHeartbeat:    time.Now(),
 		maps:             make(map[string]*world.World),
 		replicaSnapshots: make(map[string]protocol.MapCheckpoint),
+		stopCh:           make(chan struct{}),
 	}
 }
 
@@ -47,8 +49,14 @@ func (n *NodeService) Start() error {
 
 	n.lastHeartbeat = time.Now()
 	n.healthy = true
+	select {
+	case <-n.stopCh:
+		n.stopCh = make(chan struct{})
+	default:
+	}
 	n.mu.Unlock()
 
+	go n.flushLoop()
 	return nil
 }
 
@@ -58,7 +66,55 @@ func (n *NodeService) Stop() error {
 
 	n.ln = nil
 	n.healthy = false
+	select {
+	case <-n.stopCh:
+	default:
+		close(n.stopCh)
+	}
 	return nil
+}
+
+// to understand
+func (n *NodeService) flushLoop() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	// 记录上次 flush 的时间，只清洗有变动的玩家数据
+	lastFlush := time.Now()
+
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now()
+			since := lastFlush
+			lastFlush = now
+
+			n.mu.RLock()
+			// 收集所有在线热数据
+			for mapID, instance := range n.maps {
+				profiles := instance.FlushProfiles(since)
+				for _, profile := range profiles {
+					hotData := protocol.HotSession{
+						Username:       profile.Username,
+						MapID:          mapID,
+						NodeID:         n.ID,
+						X:              profile.X,
+						Y:              profile.Y,
+						HP:             profile.HP,
+						Treasures:      profile.Treasures,
+						SessionVersion: 0, // 在节点层不需要维护递增版本号了或者交由其他部分
+						UpdatedAt:      now,
+					}
+					// 将活跃用户的热数据以及必要的冷数据下沉保存
+					_ = n.store.SaveHotSession(hotData)
+					_ = n.store.SaveProfile(profile)
+				}
+			}
+			n.mu.RUnlock()
+		case <-n.stopCh:
+			return
+		}
+	}
 }
 
 func (n *NodeService) RemoveHostedMap(mapID string) {

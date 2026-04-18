@@ -184,6 +184,20 @@ func (w *World) ProfileOf(username string) (protocol.UserProfile, bool) {
 	return w.profileLocked(player), true
 }
 
+func (w *World) FlushProfiles(since time.Time) []protocol.UserProfile {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	var profiles []protocol.UserProfile
+	for _, player := range w.players {
+		w.refreshPlayerStateLocked(player)
+		if player.LastUpdate.After(since) {
+			profiles = append(profiles, w.profileLocked(player))
+		}
+	}
+	return profiles
+}
+
 func (w *World) MovePlayer(username, dir string) (string, protocol.UserProfile, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
