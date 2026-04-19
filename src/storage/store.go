@@ -4,11 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"time"
+
+	json "github.com/goccy/go-json"
 
 	"battleworld/protocol"
 

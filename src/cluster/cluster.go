@@ -448,23 +448,29 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	}
 	node := c.nodes[session.NodeID]
 	sessionVersion := session.Version
+
+	ws := protocol.AllocWorldState()
+	ws.SessionVersion = sessionVersion
+
 	//to under
 	c.eventMu.RLock()
-	var allEvents []string
+	ws.Events = ws.Events[:0]
 	//fmt.Println("[debug]", c.globalEvents)
-	allEvents = append(allEvents, c.globalEvents...)
+	ws.Events = append(ws.Events, c.globalEvents...)
 	if list, ok := c.mapEvents[session.MapID]; ok {
-		allEvents = append(allEvents, list...)
+		ws.Events = append(ws.Events, list...)
 	}
 	if list, ok := c.userEvents[username]; ok {
-		allEvents = append(allEvents, list...)
+		ws.Events = append(ws.Events, list...)
 	}
 	c.eventMu.RUnlock()
 	// 取最近不超过 8 条的事件
-	if len(allEvents) > 8 {
-		allEvents = allEvents[len(allEvents)-8:]
+	if len(ws.Events) > 8 {
+		start := len(ws.Events) - 8
+		copy(ws.Events, ws.Events[start:])
+		ws.Events = ws.Events[:8]
 	}
-	events := allEvents
+	// events := ws.Events
 	//
 	owners := make(map[string]string, len(c.owners))
 	for k, v := range c.owners {
@@ -519,7 +525,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	}
 	sort.Strings(mapIDs)
 
-	mapBriefs := make([]protocol.MapBrief, 0, len(mapIDs))
+	ws.Maps = ws.Maps[:0]
 	for _, mapID := range mapIDs {
 		ownerID := owners[mapID]
 		host := nodes[ownerID]
@@ -532,7 +538,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 			continue
 		}
 		cfg := c.configs[mapID]
-		mapBriefs = append(mapBriefs, protocol.MapBrief{
+		ws.Maps = append(ws.Maps, protocol.MapBrief{
 			ID:        mapID,
 			Name:      cfg.Name,
 			NodeID:    ownerID,
@@ -550,19 +556,14 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 		nodeIDs = append(nodeIDs, nodeID)
 	}
 	sort.Strings(nodeIDs)
-	nodeViews := make([]protocol.NodeView, 0, len(nodeIDs))
+	ws.Nodes = ws.Nodes[:0]
 	for _, nodeID := range nodeIDs {
-		nodeViews = append(nodeViews, nodes[nodeID].View())
+		ws.Nodes = append(ws.Nodes, nodes[nodeID].View())
 	}
 
-	ws := protocol.AllocWorldState()
 	ws.Self = self
 	ws.Map = mapView
-	ws.Maps = mapBriefs
-	ws.Nodes = nodeViews
 	ws.Boss = bossView
-	ws.Events = events
-	ws.SessionVersion = sessionVersion
 
 	return ws, nil
 }

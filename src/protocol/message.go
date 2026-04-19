@@ -1,10 +1,11 @@
 package protocol
 
 import (
-	"encoding/json"
 	"net"
 	"sync"
 	"time"
+
+	json "github.com/goccy/go-json"
 )
 
 const (
