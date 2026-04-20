@@ -6,6 +6,7 @@ import (
 
 	"battleworld/pb"
 	"battleworld/protocol"
+	"battleworld/world"
 )
 
 // NodeGRPCServer 是 gRPC 服务的具体实现，它包装了本地的 NodeService，对接网络请求。
@@ -173,5 +174,34 @@ func (s *NodeGRPCServer) BackgroundStep(ctx context.Context, req *pb.BackgroundS
 	}
 	return &pb.BackgroundStepResp{
 		Events: resp,
+	}, nil
+}
+
+func (s *NodeGRPCServer) StoreReplica(ctx context.Context, req *pb.StoreReplicaReq) (*pb.StoreReplicaResp, error) {
+	cp := protocol.FromProtoMapCheckpoint(req.Checkpoint)
+	s.svc.StoreReplica(cp)
+	return &pb.StoreReplicaResp{Ok: true}, nil
+}
+
+func (s *NodeGRPCServer) Promote(ctx context.Context, req *pb.PromoteReq) (*pb.PromoteResp, error) {
+	available := world.AvailableMaps()
+	var cfg world.MapConfig
+	for _, m := range available {
+		if m.ID == req.MapId {
+			cfg = m
+			break
+		}
+	}
+	err := s.svc.Promote(req.MapId, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.PromoteResp{Ok: true}, nil
+}
+
+func (s *NodeGRPCServer) View(ctx context.Context, req *pb.ViewReq) (*pb.ViewResp, error) {
+	view := s.svc.View()
+	return &pb.ViewResp{
+		View: protocol.ToProtoNodeView(view),
 	}, nil
 }

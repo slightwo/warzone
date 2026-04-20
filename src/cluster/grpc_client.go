@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"battleworld/pb"
 	"battleworld/protocol"
@@ -14,9 +15,11 @@ import (
 
 // NodeGRPCClient 是一个客户端代理，它将本地调用转换为 gRPC 网络请求发给远端 Node。
 type NodeGRPCClient struct {
-	client pb.NodeServiceClient
-	conn   *grpc.ClientConn
-	id     string
+	client  pb.NodeServiceClient
+	conn    *grpc.ClientConn
+	id      string
+	mu      sync.RWMutex
+	healthy bool
 }
 
 func NewNodeGRPCClient(id string, addr string) (*NodeGRPCClient, error) {
@@ -26,9 +29,10 @@ func NewNodeGRPCClient(id string, addr string) (*NodeGRPCClient, error) {
 		return nil, err
 	}
 	return &NodeGRPCClient{
-		client: pb.NewNodeServiceClient(conn),
-		conn:   conn,
-		id:     id,
+		client:  pb.NewNodeServiceClient(conn),
+		conn:    conn,
+		id:      id,
+		healthy: true,
 	}, nil
 }
 
@@ -214,8 +218,40 @@ func (c *NodeGRPCClient) BackgroundStep() []protocol.MapEvents {
 	return res
 }
 
-func (c *NodeGRPCClient) StoreReplica(cp protocol.MapCheckpoint)          {}
-func (c *NodeGRPCClient) Promote(mapID string, cfg world.MapConfig) error { return nil }
-func (c *NodeGRPCClient) View() protocol.NodeView                         { return protocol.NodeView{} }
-func (c *NodeGRPCClient) IsHealthy() bool                                 { return true }
-func (c *NodeGRPCClient) SetHealthy(healthy bool) bool                    { return true }
+func (c *NodeGRPCClient) StoreReplica(cp protocol.MapCheckpoint) {
+	req := &pb.StoreReplicaReq{
+		Checkpoint: protocol.ToProtoMapCheckpoint(cp),
+	}
+	_, _ = c.client.StoreReplica(context.Background(), req)
+}
+
+func (c *NodeGRPCClient) Promote(mapID string, cfg world.MapConfig) error {
+	req := &pb.PromoteReq{
+		MapId: mapID,
+	}
+	_, err := c.client.Promote(context.Background(), req)
+	return err
+}
+
+func (c *NodeGRPCClient) View() protocol.NodeView {
+	req := &pb.ViewReq{}
+	resp, err := c.client.View(context.Background(), req)
+	if err != nil || resp.View == nil {
+		return protocol.NodeView{ID: c.id, Healthy: c.IsHealthy()} // fallback
+	}
+	return protocol.FromProtoNodeView(resp.View)
+}
+
+func (c *NodeGRPCClient) IsHealthy() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.healthy
+}
+
+func (c *NodeGRPCClient) SetHealthy(healthy bool) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	old := c.healthy
+	c.healthy = healthy
+	return old
+}

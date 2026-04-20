@@ -254,9 +254,10 @@ func hashPassword(password string) string {
 }
 
 type NodeRegistryInfo struct {
-	ID   string   `json:"id"`
-	Addr string   `json:"addr"`
-	Maps []string `json:"maps"`
+	ID       string   `json:"id"`
+	Addr     string   `json:"addr"`
+	Maps     []string `json:"maps"`
+	Replicas []string `json:"replicas"`
 }
 
 func (s *Store) RegisterNode(info NodeRegistryInfo, ttl time.Duration) error {

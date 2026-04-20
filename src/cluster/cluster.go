@@ -697,6 +697,14 @@ func (c *Cluster) discoveryLoop() {
 							fmt.Printf("[Cluster 节点发现] 新节点上线: %s, 负责接管地图: %s\n", nInfo.ID, mapID)
 						}
 					}
+					// 【新增】分配该节点声明的副本映射
+					for _, mapID := range nInfo.Replicas {
+						cfg := c.configs[mapID]
+						if cfg.ID != "" {
+							c.replicas[mapID] = nInfo.ID
+							fmt.Printf("[Cluster 节点发现] 新节点上线: %s, 负责副本同步: %s\n", nInfo.ID, mapID)
+						}
+					}
 					c.mu.Unlock()
 
 					// 最后：无锁状态下进行地图数据重建、向 Node 推送快照(这是高耗时网络传输)
@@ -847,31 +855,37 @@ func (c *Cluster) checkpointLoop() {
 }
 
 func (c *Cluster) handleNodeFailure(nodeID string) {
-	// TODO(Lab3-5):
-	// 这里需要完成“主节点故障 -> 副本提升 -> 会话重路由”。
-	// 最关键的步骤是：
-	// 1. 找到故障节点承载的所有主地图。
-	// 2. 选择对应副本并提升为新主节点。
-	// 3. 更新 owners / replicas 元数据。
-	// 4. 修正所有受影响玩家会话的 NodeID，并广播故障切换事件。
-	node := c.nodes[nodeID]
-	if node == nil {
-		return
-	}
+        c.mu.Lock()
+        var map2Change []string
+        for mapID, ownerID := range c.owners {
+                if ownerID == nodeID {
+                        map2Change = append(map2Change, mapID)
+                }
+        }
 
-	map2Change := node.View().PrimaryMaps
-	c.mu.Lock()
-	for _, mapID := range map2Change {
-		replicasID := c.replicas[mapID]
-		replicasNode := c.nodes[replicasID]
-		if replicasNode == nil || !replicasNode.IsHealthy() {
-			continue
-		}
-		replicasNode.Promote(mapID, c.configs[mapID])
-		delete(c.replicas, mapID)
-		newReplicaID := c.pickReplicaLocked(replicasID)
-		c.replicas[mapID] = newReplicaID
-		c.owners[mapID] = replicasID
+        var replicaMaps2Change []string
+        for mapID, replicaID := range c.replicas {
+                if replicaID == nodeID {
+                        replicaMaps2Change = append(replicaMaps2Change, mapID)
+                }
+        }
+
+        for _, mapID := range map2Change {
+                replicasID := c.replicas[mapID]
+                replicasNode := c.nodes[replicasID]
+                if replicasNode == nil || !replicasNode.IsHealthy() {
+                        continue
+                }
+                replicasNode.Promote(mapID, c.configs[mapID])
+                delete(c.replicas, mapID)
+                newReplicaID := c.pickReplicaLocked(replicasID)
+                c.replicas[mapID] = newReplicaID
+                c.owners[mapID] = replicasID
+        }
+
+        for _, mapID := range replicaMaps2Change {
+                newReplicaID := c.pickReplicaLocked(c.owners[mapID])
+                c.replicas[mapID] = newReplicaID
 
 	}
 	sessions, _ := c.store.GetAllGlobalSessions()

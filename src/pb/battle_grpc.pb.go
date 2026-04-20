@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v3.6.1
-// source: battle.proto
+// source: pb/battle.proto
 
 package pb
 
@@ -111,7 +111,7 @@ var GatewayService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "battle.proto",
+	Metadata: "pb/battle.proto",
 }
 
 const (
@@ -129,6 +129,9 @@ const (
 	NodeService_Checkpoint_FullMethodName     = "/pb.NodeService/Checkpoint"
 	NodeService_BackgroundStep_FullMethodName = "/pb.NodeService/BackgroundStep"
 	NodeService_AttackBoss_FullMethodName     = "/pb.NodeService/AttackBoss"
+	NodeService_StoreReplica_FullMethodName   = "/pb.NodeService/StoreReplica"
+	NodeService_Promote_FullMethodName        = "/pb.NodeService/Promote"
+	NodeService_View_FullMethodName           = "/pb.NodeService/View"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -149,6 +152,9 @@ type NodeServiceClient interface {
 	Checkpoint(ctx context.Context, in *CheckpointReq, opts ...grpc.CallOption) (*CheckpointResp, error)
 	BackgroundStep(ctx context.Context, in *BackgroundStepReq, opts ...grpc.CallOption) (*BackgroundStepResp, error)
 	AttackBoss(ctx context.Context, in *AttackBossReq, opts ...grpc.CallOption) (*AttackBossResp, error)
+	StoreReplica(ctx context.Context, in *StoreReplicaReq, opts ...grpc.CallOption) (*StoreReplicaResp, error)
+	Promote(ctx context.Context, in *PromoteReq, opts ...grpc.CallOption) (*PromoteResp, error)
+	View(ctx context.Context, in *ViewReq, opts ...grpc.CallOption) (*ViewResp, error)
 }
 
 type nodeServiceClient struct {
@@ -299,6 +305,36 @@ func (c *nodeServiceClient) AttackBoss(ctx context.Context, in *AttackBossReq, o
 	return out, nil
 }
 
+func (c *nodeServiceClient) StoreReplica(ctx context.Context, in *StoreReplicaReq, opts ...grpc.CallOption) (*StoreReplicaResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StoreReplicaResp)
+	err := c.cc.Invoke(ctx, NodeService_StoreReplica_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeServiceClient) Promote(ctx context.Context, in *PromoteReq, opts ...grpc.CallOption) (*PromoteResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PromoteResp)
+	err := c.cc.Invoke(ctx, NodeService_Promote_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeServiceClient) View(ctx context.Context, in *ViewReq, opts ...grpc.CallOption) (*ViewResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ViewResp)
+	err := c.cc.Invoke(ctx, NodeService_View_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // NodeServiceServer is the server API for NodeService service.
 // All implementations must embed UnimplementedNodeServiceServer
 // for forward compatibility.
@@ -317,6 +353,9 @@ type NodeServiceServer interface {
 	Checkpoint(context.Context, *CheckpointReq) (*CheckpointResp, error)
 	BackgroundStep(context.Context, *BackgroundStepReq) (*BackgroundStepResp, error)
 	AttackBoss(context.Context, *AttackBossReq) (*AttackBossResp, error)
+	StoreReplica(context.Context, *StoreReplicaReq) (*StoreReplicaResp, error)
+	Promote(context.Context, *PromoteReq) (*PromoteResp, error)
+	View(context.Context, *ViewReq) (*ViewResp, error)
 	mustEmbedUnimplementedNodeServiceServer()
 }
 
@@ -368,6 +407,15 @@ func (UnimplementedNodeServiceServer) BackgroundStep(context.Context, *Backgroun
 }
 func (UnimplementedNodeServiceServer) AttackBoss(context.Context, *AttackBossReq) (*AttackBossResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method AttackBoss not implemented")
+}
+func (UnimplementedNodeServiceServer) StoreReplica(context.Context, *StoreReplicaReq) (*StoreReplicaResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method StoreReplica not implemented")
+}
+func (UnimplementedNodeServiceServer) Promote(context.Context, *PromoteReq) (*PromoteResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method Promote not implemented")
+}
+func (UnimplementedNodeServiceServer) View(context.Context, *ViewReq) (*ViewResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method View not implemented")
 }
 func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
 func (UnimplementedNodeServiceServer) testEmbeddedByValue()                     {}
@@ -642,6 +690,60 @@ func _NodeService_AttackBoss_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NodeService_StoreReplica_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StoreReplicaReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).StoreReplica(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_StoreReplica_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).StoreReplica(ctx, req.(*StoreReplicaReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_Promote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PromoteReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).Promote(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_Promote_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).Promote(ctx, req.(*PromoteReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_View_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ViewReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).View(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_View_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).View(ctx, req.(*ViewReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // NodeService_ServiceDesc is the grpc.ServiceDesc for NodeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -705,7 +807,19 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "AttackBoss",
 			Handler:    _NodeService_AttackBoss_Handler,
 		},
+		{
+			MethodName: "StoreReplica",
+			Handler:    _NodeService_StoreReplica_Handler,
+		},
+		{
+			MethodName: "Promote",
+			Handler:    _NodeService_Promote_Handler,
+		},
+		{
+			MethodName: "View",
+			Handler:    _NodeService_View_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "battle.proto",
+	Metadata: "pb/battle.proto",
 }

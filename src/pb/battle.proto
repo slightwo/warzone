@@ -207,6 +207,9 @@ service NodeService {
     rpc Checkpoint(CheckpointReq) returns (CheckpointResp);
     rpc BackgroundStep(BackgroundStepReq) returns (BackgroundStepResp);
     rpc AttackBoss(AttackBossReq) returns (AttackBossResp);
+    rpc StoreReplica(StoreReplicaReq) returns (StoreReplicaResp);
+    rpc Promote(PromoteReq) returns (PromoteResp);
+    rpc View(ViewReq) returns (ViewResp);
 }
 
 message AttackBossReq {
@@ -312,4 +315,26 @@ message MapCheckpoint {
     repeated NPCView npcs = 6;
     repeated TreasureView treasures = 7;
     string checkpoint = 8;
+}
+
+message StoreReplicaReq {
+    MapCheckpoint checkpoint = 1;
+}
+
+message StoreReplicaResp {
+    bool ok = 1;
+}
+
+message PromoteReq {
+    string map_id = 1;
+}
+
+message PromoteResp {
+    bool ok = 1;
+}
+
+message ViewReq {}
+
+message ViewResp {
+    NodeView view = 1;
 }

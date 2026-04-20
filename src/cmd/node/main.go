@@ -20,16 +20,18 @@ import (
 
 func main() {
 	var (
-		nodeID   string
-		nodeAddr string
-		mapsStr  string
+		nodeID      string
+		nodeAddr    string
+		mapsStr     string
+		replicasStr string
 	)
 	flag.StringVar(&nodeID, "id", "node-a", "节点唯一标识 (如: node-a)")
 	flag.StringVar(&nodeAddr, "addr", "127.0.0.1:9311", "节点监听地址 (如: 127.0.0.1:9311)")
-	flag.StringVar(&mapsStr, "maps", "green,ruins", "节点托管的地图ID, 逗号分隔")
+	flag.StringVar(&mapsStr, "maps", "", "节点托管的主地图ID, 逗号分隔 (如: green,ruins)")
+	flag.StringVar(&replicasStr, "replicas", "", "节点托管的副本地图ID, 逗号分隔")
 	flag.Parse()
 
-	log.Printf("正在启动物理节点 [%s]，监听地址：%s，托管地图：%s", nodeID, nodeAddr, mapsStr)
+	log.Printf("正在启动物理节点 [%s]，监听地址：%s，托管地图：%s，托管副本：%s", nodeID, nodeAddr, mapsStr, replicasStr)
 
 	// 连接 Store 获取 Redis
 	store, err := storage.NewStore(".")
@@ -62,6 +64,16 @@ func main() {
 		}
 	}
 
+	replicas := strings.Split(replicasStr, ",")
+	var hostedReplicas []string
+	for _, mapID := range replicas {
+		mapID = strings.TrimSpace(mapID)
+		if mapID != "" {
+			hostedReplicas = append(hostedReplicas, mapID)
+			log.Printf("节点 [%s] 本地成功加载副本: %s", nodeID, mapID)
+		}
+	}
+
 	grpcNode := node.NewNodeGRPCServer(ns)
 
 	lis, err := net.Listen("tcp", nodeAddr)
@@ -78,9 +90,10 @@ func main() {
 			ticker := time.NewTicker(3 * time.Second)
 			defer ticker.Stop()
 			info := storage.NodeRegistryInfo{
-				ID:   nodeID,
-				Addr: nodeAddr,
-				Maps: hostedMaps,
+				ID:       nodeID,
+				Addr:     nodeAddr,
+				Maps:     hostedMaps,
+				Replicas: hostedReplicas,
 			}
 			for {
 				if err := store.RegisterNode(info, 5*time.Second); err != nil {

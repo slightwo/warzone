@@ -113,18 +113,18 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 				st, err := s.gameCluster.SnapshotFor(username)
 				if err != nil {
 					sendCh <- &protocol.Message{Type: protocol.TypeError, Error: err.Error()}
-					stop()
-					return
+					if strings.Contains(err.Error(), "当前不在线") || strings.Contains(err.Error(), "不存在") {
+						stop()
+						return
+					}
+					continue
 				}
 				sendCh <- &protocol.Message{Type: protocol.TypeState, State: st}
-
-			//	protocol.FreeWorldState(st)
 			case <-done:
 				return
 			}
 		}
 	}()
-
 	// 接收指令循环
 	for {
 		select {
