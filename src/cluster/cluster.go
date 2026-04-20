@@ -133,7 +133,7 @@ func (c *Cluster) Close() {
 
 	for mapID, nodeID := range owners {
 		owner := c.nodes[nodeID]
-		if !owner.IsHealthy() {
+		if owner == nil || !owner.IsHealthy() {
 			continue
 		}
 		CP, _ := owner.Checkpoint(context.Background(), mapID)
@@ -650,37 +650,68 @@ func (c *Cluster) discoveryLoop() {
 				continue
 			}
 
-			c.mu.Lock()
+			// 改进 1：先使用只读锁(RLock)快速扫描出尚未注册的“新节点”结构
+			var newInfos []storage.NodeRegistryInfo
+			c.mu.RLock()
 			for _, info := range activeNodes {
-				// 如果是新节点，则建立链接并初始化地图分布
 				if _, ok := c.nodes[info.ID]; !ok {
-					client, err := NewNodeGRPCClient(info.ID, info.Addr)
-					if err == nil {
-						c.nodes[info.ID] = client
-
-						// 将该节点宣称自己负责的地图加入 owners 列表
-						for _, mapID := range info.Maps {
-							cfg := c.configs[mapID]
-
-							// 只处理存在的合法地图类型
-							if cfg.ID != "" {
-								c.owners[mapID] = info.ID
-								fmt.Printf("[Cluster 节点发现] 新节点上线: %s, 负责接管地图: %s\n", info.ID, mapID)
-
-								// 把最新的全服快照推送给它
-								if cp, ok := c.store.LoadCheckpoint(mapID); ok {
-									client.RestorePrimaryMap(cfg, *cp)
-								} else {
-									client.InstallPrimaryMap(cfg)
-								}
-							}
-						}
-						// 调用它的 Start，为了符合 NodeClient 接口规范
-						_ = client.Start()
-					}
+					newInfos = append(newInfos, info)
 				}
 			}
-			c.mu.Unlock()
+			c.mu.RUnlock()
+
+			// 改进 2：对于每一个新节点，启动独立的异步协程处理网络连接和推送快照，不再阻塞 Cluster 主循环
+			for _, info := range newInfos {
+				go func(nInfo storage.NodeRegistryInfo) {
+					// 独立发起耗时的网络握手
+					client, err := NewNodeGRPCClient(nInfo.ID, nInfo.Addr)
+					if err != nil {
+						// 连接失败直接返回，下次轮询时该节点如果在Redis且未注册还会被发现并重试
+						return
+					}
+
+					// 【修复点】：确认新节点确实存活。因为Redis里可能有并未过期的已宕机脏数据
+					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+					defer cancel()
+					if err := client.Ping(ctx); err != nil {
+						return
+					}
+
+					// 调用它的 Start
+					_ = client.Start()
+
+					// 获取短写锁，将验证好的新节点挂入路由拓扑 (不在此锁内发 RPC)
+					c.mu.Lock()
+					// 需做二次校验以防御重入
+					if _, exists := c.nodes[nInfo.ID]; exists {
+						c.mu.Unlock()
+						return
+					}
+					c.nodes[nInfo.ID] = client
+
+					// 【基于用户前提假设：保证无冲突抢占】分配该节点声明的各种地图映射
+					for _, mapID := range nInfo.Maps {
+						cfg := c.configs[mapID]
+						if cfg.ID != "" {
+							c.owners[mapID] = nInfo.ID
+							fmt.Printf("[Cluster 节点发现] 新节点上线: %s, 负责接管地图: %s\n", nInfo.ID, mapID)
+						}
+					}
+					c.mu.Unlock()
+
+					// 最后：无锁状态下进行地图数据重建、向 Node 推送快照(这是高耗时网络传输)
+					for _, mapID := range nInfo.Maps {
+						cfg := c.configs[mapID]
+						if cfg.ID != "" {
+							if cp, ok := c.store.LoadCheckpoint(mapID); ok {
+								client.RestorePrimaryMap(cfg, *cp)
+							} else {
+								client.InstallPrimaryMap(cfg)
+							}
+						}
+					}
+				}(info)
+			}
 
 		case <-c.stopCh:
 			return
@@ -788,7 +819,7 @@ func (c *Cluster) checkpointLoop() {
 
 			for mapID, nodeID := range owners {
 				owner := c.nodes[nodeID] //c.nodes是静态的，不存在被修改的风险
-				if !owner.IsHealthy() {
+				if owner == nil || !owner.IsHealthy() {
 					continue
 				}
 				CP, _ := owner.Checkpoint(context.Background(), mapID)
@@ -850,6 +881,8 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 			c.store.SaveGlobalSession(session)
 		}
 	}
+	// 【新增】从注册表中物理移除该失效节点
+	delete(c.nodes, nodeID)
 	c.mu.Unlock()
 	c.broadcastGlobalEvent(fmt.Sprintf("%q 发生故障，已转移其他节点负责", nodeID))
 
