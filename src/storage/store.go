@@ -391,17 +391,70 @@ func (s *Store) SaveGlobalBoss(state protocol.BossState) error {
 	return s.rdb.Set(ctx, "boss:global:state", stateJson, 0).Err()
 }
 
-func (s *Store) DecrGlobalBossHP(username string, damage int) (int32, error) {
+// func (s *Store) DecrGlobalBossHP(username string, damage int) (int32, error) {
+// 	ctx := s.ctx
+// 	newHp, err := s.rdb.DecrBy(ctx, "boss:global:hp", int64(damage)).Result()
+// 	return int32(newHp), err
+// }
+
+// AtomicAttackBoss 使用 Lua 脚本原子性地执行扣血与首领死亡判定
+func (s *Store) AtomicAttackBoss(username string, damage int) (int32, bool, protocol.BossState, error) {
 	ctx := s.ctx
-	newHp, err := s.rdb.DecrBy(ctx, "boss:global:hp", int64(damage)).Result()
-	return int32(newHp), err
+	script := `
+		local hpKey = KEYS[1]
+		local stateKey = KEYS[2]
+		local damage = tonumber(ARGV[1])
+		local username = ARGV[2]
+		
+		local hp = tonumber(redis.call('GET', hpKey) or '0')
+		if hp <= 0 then
+			return {-1, 0, redis.call('GET', stateKey)}
+		end
+		
+		local newHp = redis.call('DECRBY', hpKey, damage)
+		local isKiller = 0
+		
+		-- 如果扣血跨过 0 线，则当前请求就是致命一击
+		if newHp <= 0 and (newHp + damage) > 0 then
+			isKiller = 1
+			newHp = 0
+			redis.call('SET', hpKey, 0) -- 修正负血量
+			
+			-- 同步更新 State
+			local stateStr = redis.call('GET', stateKey)
+			if stateStr then
+				-- 由于 Lua 环境没有内建完善的 JSON 库处理全部结构，可通过外部传入或简单替换解决
+				-- 这里依赖外部 Go 代码拿到 isKiller 后再安全保存。这种变通减少在 Lua 里做复杂的 Json 处理。
+			end
+		end
+		
+		return {newHp, isKiller}
+	`
+
+	res, err := s.rdb.Eval(ctx, script, []string{"boss:global:hp", "boss:global:state"}, int64(damage), username).Result()
+	if err != nil {
+		return 0, false, protocol.BossState{}, err
+	}
+
+	rawRes := res.([]interface{})
+	if len(rawRes) == 3 { // HP 已经 <= 0
+		stateJson := rawRes[2].(string)
+		var state protocol.BossState
+		json.Unmarshal([]byte(stateJson), &state)
+		return -1, false, state, nil
+	}
+
+	newHp := int32(rawRes[0].(int64))
+	isKiller := rawRes[1].(int64) == 1
+
+	return newHp, isKiller, protocol.BossState{}, nil
 }
 
-func (s *Store) TryLockBossKill() bool {
-	ctx := s.ctx
-	ok, err := s.rdb.SetNX(ctx, "boss:global:kill_lock", true, 15*time.Second).Result()
-	return err == nil && ok
-}
+// func (s *Store) TryLockBossKill() bool {
+// 	ctx := s.ctx
+// 	ok, err := s.rdb.SetNX(ctx, "boss:global:kill_lock", true, 15*time.Second).Result()
+// 	return err == nil && ok
+// }
 
 func (s *Store) TryLockBossRespawn() bool {
 	ctx := s.ctx

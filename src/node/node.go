@@ -291,30 +291,31 @@ func (n *NodeService) AttackBoss(ctx context.Context, mapID, username string) (s
 	}
 
 	damage := profile.Attack
-	newHp, err := n.store.DecrGlobalBossHP(username, damage)
+	newHp, isKiller, _, err := n.store.AtomicAttackBoss(username, damage)
 	if err != nil {
 		fmt.Println("[debug]node.go attackBoss:攻击首领时err：", err)
 		return "", protocol.UserProfile{}, true, err
 	}
 
-	newHpMaxZero := newHp
-	if newHpMaxZero < 0 {
-		newHpMaxZero = 0
+	if newHp == -1 {
+		// 如果扣血时发现 hp <= 0，说明已经被击杀
+		return "首领还在复活倒计时", profile, true, nil
 	}
-	event := fmt.Sprintf("%s 对 %s 造成了 %d 点伤害！剩余HP：%d", username, state.Name, damage, newHpMaxZero)
 
-	if newHp <= 0 && state.Alive {
-		if n.store.TryLockBossKill() {
-			state, _, _ = n.store.LoadGlobalBoss()
-			if state.Alive {
-				state.Alive = false
-				state.LastHit = username
-				state.RespawnAt = time.Now().Add(15 * time.Second)
-				n.store.SaveGlobalBoss(state)
-				event += fmt.Sprintf("\nboss:%s,已经死亡！终结者：%s", state.Name, username)
-			}
+	event := fmt.Sprintf("%s 对 %s 造成了 %d 点伤害！剩余HP：%d", username, state.Name, damage, newHp)
+
+	if isKiller {
+		// 该玩家为实际的终结者（因 Lua 内部拦截防超扣并确认了致命一击）
+		state, _, _ = n.store.LoadGlobalBoss()
+		if state.Alive {
+			state.Alive = false
+			state.LastHit = username
+			state.RespawnAt = time.Now().Add(15 * time.Second)
+			n.store.SaveGlobalBoss(state)
 		}
+		event += fmt.Sprintf("\nboss:%s,已经死亡！终结者：%s", state.Name, username)
 	}
+
 	fmt.Println("[debug]node.go attackBoss:成功")
 	return event, profile, true, nil
 }
