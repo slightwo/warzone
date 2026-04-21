@@ -1,0 +1,2 @@
+go run ./cmd/node -id "node-a" -maps "green" -replicas "cave" -addr "127.0.0.1:9311"
+go run ./cmd/node -id "node-b" -maps "cave,ruins" -addr "127.0.0.1:9312"

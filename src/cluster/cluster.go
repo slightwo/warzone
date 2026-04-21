@@ -281,7 +281,7 @@ func (c *Cluster) Move(username, dir string) (*protocol.WorldState, error) {
 	// profile.LastMap = session.MapID
 	//	_ = c.store.SaveProfile(profile)
 	//	_ = c.persistSessionState(username)
-	return c.SnapshotFor(username)
+	return nil, nil //c.SnapshotFor(username)
 }
 
 func (c *Cluster) Attack(username string) (*protocol.WorldState, error) {

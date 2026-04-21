@@ -105,7 +105,7 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 		}
 	}()
 
-	ticker := time.NewTicker(400 * time.Millisecond)
+	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
 	// 心跳/状态推送协程
@@ -169,9 +169,9 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 		}
 
 		if next != nil {
-			sendCh <- &protocol.Message{Type: protocol.TypeState, State: next}
-
-			//	protocol.FreeWorldState(next)
+			// 策略一：应用层防抖，只执行业务逻辑，不立即返回全量状态
+			// 状态的下发统一交给上面 200ms 的 Ticker 批量处理，大幅降低 syscall 发包频次
+			protocol.FreeWorldState(next)
 		}
 	}
 }

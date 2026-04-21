@@ -76,7 +76,7 @@ func (n *NodeService) Stop() error {
 
 // to understand
 func (n *NodeService) flushLoop() {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	// 记录上次 flush 的时间，只清洗有变动的玩家数据
@@ -107,7 +107,7 @@ func (n *NodeService) flushLoop() {
 					}
 					// 将活跃用户的热数据以及必要的冷数据下沉保存
 					_ = n.store.SaveHotSession(hotData)
-					_ = n.store.SaveProfile(profile)
+					//_ = n.store.SaveProfile(profile)
 				}
 			}
 			n.mu.RUnlock()
