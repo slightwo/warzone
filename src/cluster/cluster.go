@@ -53,6 +53,11 @@ type NodeClient interface {
 	SetHealthy(healthy bool) bool
 }
 
+type MapCacheData struct {
+	View  *protocol.MapView
+	Brief protocol.MapBrief
+}
+
 type Cluster struct {
 	mu       sync.RWMutex
 	store    *storage.Store
@@ -62,12 +67,16 @@ type Cluster struct {
 	configs  map[string]world.MapConfig //..
 	stopCh   chan struct{}
 
+	mapCacheMu sync.RWMutex
+	mapCache   map[string]MapCacheData
+
 	// to understand事件分离：纯内存通道，各个无状态网关实例自行订阅并缓冲
 	eventMu      sync.RWMutex
 	globalEvents []string
 	mapEvents    map[string][]string
-	userEvents   map[string][]string
-	pubsub       *redis.PubSub
+
+	userEvents map[string][]string
+	pubsub     *redis.PubSub
 }
 
 var studentTodoNotice sync.Map
@@ -80,6 +89,7 @@ func NewCluster(store *storage.Store) (*Cluster, error) {
 		replicas:   make(map[string]string),
 		configs:    make(map[string]world.MapConfig),
 		stopCh:     make(chan struct{}),
+		mapCache:   make(map[string]MapCacheData),
 		mapEvents:  make(map[string][]string), //to understand
 		userEvents: make(map[string][]string), //
 	}
@@ -112,6 +122,7 @@ func (c *Cluster) Start() error {
 			return err
 		}
 	}
+	go c.mapCacheLoop()
 	go c.discoveryLoop()
 	go c.backgroundLoop()
 	go c.heartbeatLoop()
@@ -455,7 +466,6 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	//to under
 	c.eventMu.RLock()
 	ws.Events = ws.Events[:0]
-	//fmt.Println("[debug]", c.globalEvents)
 	ws.Events = append(ws.Events, c.globalEvents...)
 	if list, ok := c.mapEvents[session.MapID]; ok {
 		ws.Events = append(ws.Events, list...)
@@ -470,16 +480,12 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 		copy(ws.Events, ws.Events[start:])
 		ws.Events = ws.Events[:8]
 	}
-	// events := ws.Events
-	//
-	owners := make(map[string]string, len(c.owners))
-	for k, v := range c.owners {
-		owners[k] = v
-	}
+
 	nodes := make(map[string]NodeClient, len(c.nodes))
 	for k, v := range c.nodes {
 		nodes[k] = v
 	}
+	configs := c.configs
 	c.mu.RUnlock()
 
 	bState, hp, _ := c.store.LoadGlobalBoss()
@@ -506,10 +512,19 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 		return nil, errors.New("当前承载节点已不可用")
 	}
 
-	mapView, err := node.Snapshot(context.Background(), session.MapID)
-	if err != nil {
-		return nil, fmt.Errorf("节点RPC获取地图快照异常: %v", err)
+	// 新增：从缓存读取地图状态，消除 O(M) 次 RPC 放大
+	c.mapCacheMu.RLock()
+	cachedCurrent, mapOk := c.mapCache[session.MapID]
+	cachedAllBriefs := make(map[string]protocol.MapBrief)
+	for _, k := range c.mapCache {
+		cachedAllBriefs[k.Brief.ID] = k.Brief
 	}
+	c.mapCacheMu.RUnlock()
+
+	if !mapOk || cachedCurrent.View == nil {
+		return nil, fmt.Errorf("地图状态正在同步中，请稍候")
+	}
+	mapView := *cachedCurrent.View
 
 	self := protocol.PlayerView{}
 	for _, player := range mapView.Players {
@@ -519,36 +534,18 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 		}
 	}
 
-	mapIDs := make([]string, 0, len(c.configs))
-	for mapID := range c.configs {
+	mapIDs := make([]string, 0, len(configs))
+	for mapID := range configs {
 		mapIDs = append(mapIDs, mapID)
 	}
 	sort.Strings(mapIDs)
 
 	ws.Maps = ws.Maps[:0]
 	for _, mapID := range mapIDs {
-		ownerID := owners[mapID]
-		host := nodes[ownerID]
-		if host == nil {
-			continue
+		if brief, ok := cachedAllBriefs[mapID]; ok {
+			brief.IsCurrent = (mapID == session.MapID)
+			ws.Maps = append(ws.Maps, brief)
 		}
-		players, npcs, treasures, version, err := host.Counts(context.Background(), mapID)
-		if err != nil {
-			fmt.Printf("[WARN] 节点RPC获取地图状态(Counts)异常: %v\n", err)
-			continue
-		}
-		cfg := c.configs[mapID]
-		ws.Maps = append(ws.Maps, protocol.MapBrief{
-			ID:        mapID,
-			Name:      cfg.Name,
-			NodeID:    ownerID,
-			Players:   players,
-			NPCs:      npcs,
-			Treasures: treasures,
-			Version:   version,
-			Primary:   true,
-			IsCurrent: mapID == session.MapID,
-		})
 	}
 
 	nodeIDs := make([]string, 0, len(nodes))
@@ -761,6 +758,84 @@ func (c *Cluster) backgroundLoop() {
 	}
 }
 
+func (c *Cluster) mapCacheLoop() {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			c.mu.RLock()
+			owners := make(map[string]string)
+			for k, v := range c.owners {
+				owners[k] = v
+			}
+			nodes := make(map[string]NodeClient)
+			for k, v := range c.nodes {
+				nodes[k] = v
+			}
+			configs := c.configs
+			c.mu.RUnlock()
+
+			var wg sync.WaitGroup
+			var cacheMu sync.Mutex
+			newCache := make(map[string]MapCacheData)
+
+			for mapID, ownerID := range owners {
+				host := nodes[ownerID]
+				if host == nil || !host.IsHealthy() {
+					continue
+				}
+				cfg := configs[mapID]
+				wg.Add(1)
+				go func(mapID string, host NodeClient, name string) {
+					defer wg.Done()
+
+					// 1. 获取 Snapshot
+					mapView, err := host.Snapshot(context.Background(), mapID)
+					if err != nil {
+						return
+					}
+
+					// 2. 获取 Counts （可以直接通过 mapView len 获取避免 RPC）
+					players := len(mapView.Players)
+					npcs := len(mapView.NPCs)
+					treasures := len(mapView.Treasures)
+					version := mapView.Version
+
+					brief := protocol.MapBrief{
+						ID:        mapID,
+						Name:      name,
+						NodeID:    host.NodeID(),
+						Players:   players,
+						NPCs:      npcs,
+						Treasures: treasures,
+						Version:   version,
+						Primary:   true,
+						// IsCurrent: 会在外面装配
+					}
+
+					cacheMu.Lock()
+					newCache[mapID] = MapCacheData{
+						View:  &mapView,
+						Brief: brief,
+					}
+					cacheMu.Unlock()
+				}(mapID, host, cfg.Name)
+			}
+			wg.Wait()
+
+			c.mapCacheMu.Lock()
+			for k, v := range newCache {
+				c.mapCache[k] = v
+			}
+			c.mapCacheMu.Unlock()
+		case <-c.stopCh:
+			return
+		}
+	}
+}
+
 func (c *Cluster) heartbeatLoop() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -855,37 +930,37 @@ func (c *Cluster) checkpointLoop() {
 }
 
 func (c *Cluster) handleNodeFailure(nodeID string) {
-        c.mu.Lock()
-        var map2Change []string
-        for mapID, ownerID := range c.owners {
-                if ownerID == nodeID {
-                        map2Change = append(map2Change, mapID)
-                }
-        }
+	c.mu.Lock()
+	var map2Change []string
+	for mapID, ownerID := range c.owners {
+		if ownerID == nodeID {
+			map2Change = append(map2Change, mapID)
+		}
+	}
 
-        var replicaMaps2Change []string
-        for mapID, replicaID := range c.replicas {
-                if replicaID == nodeID {
-                        replicaMaps2Change = append(replicaMaps2Change, mapID)
-                }
-        }
+	var replicaMaps2Change []string
+	for mapID, replicaID := range c.replicas {
+		if replicaID == nodeID {
+			replicaMaps2Change = append(replicaMaps2Change, mapID)
+		}
+	}
 
-        for _, mapID := range map2Change {
-                replicasID := c.replicas[mapID]
-                replicasNode := c.nodes[replicasID]
-                if replicasNode == nil || !replicasNode.IsHealthy() {
-                        continue
-                }
-                replicasNode.Promote(mapID, c.configs[mapID])
-                delete(c.replicas, mapID)
-                newReplicaID := c.pickReplicaLocked(replicasID)
-                c.replicas[mapID] = newReplicaID
-                c.owners[mapID] = replicasID
-        }
+	for _, mapID := range map2Change {
+		replicasID := c.replicas[mapID]
+		replicasNode := c.nodes[replicasID]
+		if replicasNode == nil || !replicasNode.IsHealthy() {
+			continue
+		}
+		replicasNode.Promote(mapID, c.configs[mapID])
+		delete(c.replicas, mapID)
+		newReplicaID := c.pickReplicaLocked(replicasID)
+		c.replicas[mapID] = newReplicaID
+		c.owners[mapID] = replicasID
+	}
 
-        for _, mapID := range replicaMaps2Change {
-                newReplicaID := c.pickReplicaLocked(c.owners[mapID])
-                c.replicas[mapID] = newReplicaID
+	for _, mapID := range replicaMaps2Change {
+		newReplicaID := c.pickReplicaLocked(c.owners[mapID])
+		c.replicas[mapID] = newReplicaID
 
 	}
 	sessions, _ := c.store.GetAllGlobalSessions()
