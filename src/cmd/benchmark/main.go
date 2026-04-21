@@ -16,6 +16,8 @@ import (
 
 	"battleworld/pb"
 	"battleworld/protocol"
+
+	_ "net/http/pprof"
 )
 
 var (

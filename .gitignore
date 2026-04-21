@@ -1,1 +1,3 @@
 .gocache/
+src/cmd/benchmark/server.log
+src/cmd/benchmark/server.bin

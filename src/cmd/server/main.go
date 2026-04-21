@@ -16,6 +16,9 @@ import (
 	"battleworld/pb"
 	"battleworld/protocol"
 	"battleworld/storage"
+
+	"net/http"
+	_ "net/http/pprof"
 )
 
 type GatewayServer struct {
@@ -174,6 +177,11 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 }
 
 func main() {
+
+	go func() {
+		_ = http.ListenAndServe("localhost:6060", nil)
+	}()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
