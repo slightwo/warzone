@@ -232,6 +232,7 @@ func printMetrics(actualDuration time.Duration) {
 	}
 
 	avgLatency := totalLatency / time.Duration(len(copiedLats))
+	sort.Slice(copiedLats, func(i, j int) bool { return copiedLats[i] < copiedLats[j] })
 	p95 := copiedLats[int(float64(len(copiedLats))*0.95)]
 	p99 := copiedLats[int(float64(len(copiedLats))*0.99)]
 

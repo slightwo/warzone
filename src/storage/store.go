@@ -18,6 +18,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var storeAddr = "10.105.18.252"
+
 type Store struct {
 	db  *gorm.DB
 	rdb *redis.Client
@@ -89,10 +91,10 @@ func fromDBUser(u UserRecord) protocol.UserProfile {
 func NewStore(baseDir string) (*Store, error) {
 	// 连接 PostgreSQL (冷数据)
 	// 根据实际环境修改 DSN
-	dsn := "host=localhost user=postgres password='Wu050601&&' dbname=battleworld port=5432 sslmode=disable TimeZone=Asia/Shanghai"
+	dsn := fmt.Sprintf("host=%s user=postgres password='Wu050601&&' dbname=battleworld port=5432 sslmode=disable TimeZone=Asia/Shanghai", storeAddr)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		fmt.Printf("警告: 无法连接PostgreSQL (%v)!\n可能需要确保 PostgreSQL 在 localhost:5432 运行\n", err)
+		fmt.Printf("警告: 无法连接PostgreSQL (%v)!\n可能需要确保 PostgreSQL 在 %s:5432 运行\n", err, storeAddr)
 		return nil, err
 	}
 
@@ -113,14 +115,14 @@ func NewStore(baseDir string) (*Store, error) {
 
 	// 连接 Redis (热数据)
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
+		Addr:     fmt.Sprintf("%s:6379", storeAddr),
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
 
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		fmt.Printf("警告: 无法连接Redis (%v)!\n可能需要确保 Redis 在 localhost:6379 运行\n", err)
+		fmt.Printf("警告: 无法连接Redis (%v)!\n可能需要确保 Redis 在 %s:6379 运行\n", err, storeAddr)
 		return nil, err
 	}
 

@@ -77,6 +77,9 @@ type Cluster struct {
 
 	userEvents map[string][]string
 	pubsub     *redis.PubSub
+
+	// 本地缓存，存放活跃用户的 Session，减少访问 Redis 的开销
+	localSessions sync.Map
 }
 
 var studentTodoNotice sync.Map
@@ -231,6 +234,7 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 		Version:  1,
 	}
 	_ = c.store.SaveGlobalSession(session)
+	c.localSessions.Store(username, &session) // 更新本地缓存
 	c.mu.Unlock()
 	//to under
 	_ = c.store.PublishEvent("events:user:"+username, fmt.Sprintf("欢迎回来，%s", username))
@@ -247,6 +251,7 @@ func (c *Cluster) Logout(username string) error {
 		return nil
 	}
 	_ = c.store.DeleteGlobalSession(username)
+	c.localSessions.Delete(username) // 同理，也删除本地缓存
 	c.mu.Unlock()
 
 	node := c.nodes[session.NodeID]
@@ -269,14 +274,14 @@ func (c *Cluster) Move(username, dir string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	event, _, ok, err := node.MovePlayer(context.Background(), session.MapID, username, dir)
+	_, _, ok, err := node.MovePlayer(context.Background(), session.MapID, username, dir)
 	if err != nil {
 		return nil, fmt.Errorf("节点RPC移动调用失败: %v", err)
 	}
 	if !ok {
 		return nil, errors.New("移动请求被拒绝")
 	}
-	c.pushEvent(username, event)
+	//c.pushEvent(username, event)
 	// profile.LastNode = session.NodeID
 	// profile.LastMap = session.MapID
 	//	_ = c.store.SaveProfile(profile)
@@ -432,12 +437,13 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 		session.NodeID = dst.NodeID()
 		session.Version++
 		_ = c.store.SaveGlobalSession(*session)
+		c.localSessions.Store(username, session) // 跨节点切图成功，更新本地缓存
 	}
 
 	c.mu.Unlock()
 
 	if ok && session != nil {
-		c.pushEventLocked(session, fmt.Sprintf("切换到地图 %s", targetMap))
+		c.pushEvent(session.Username, fmt.Sprintf("切换到地图 %s", targetMap))
 	}
 	_ = c.store.SaveProfile(profile)
 	// _ = c.persistSessionState(username) // Removed
@@ -451,13 +457,10 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 }
 
 func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
-	c.mu.RLock()
-	session, ok := c.store.LoadGlobalSession(username)
-	if !ok {
-		c.mu.RUnlock()
-		return nil, fmt.Errorf("用户 %q 当前不在线", username)
+	session, node, err := c.sessionNode(username)
+	if err != nil {
+		return nil, err
 	}
-	node := c.nodes[session.NodeID]
 	sessionVersion := session.Version
 
 	ws := protocol.AllocWorldState()
@@ -481,6 +484,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 		ws.Events = ws.Events[:8]
 	}
 
+	c.mu.RLock()
 	nodes := make(map[string]NodeClient, len(c.nodes))
 	for k, v := range c.nodes {
 		nodes[k] = v
@@ -566,6 +570,24 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 }
 
 func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, NodeClient, error) {
+	// 1. 优先从本地内存获取无锁化读取
+	if val, ok := c.localSessions.Load(username); ok {
+		session := val.(*storage.GlobalSession)
+
+		c.mu.RLock()
+		node := c.nodes[session.NodeID]
+		c.mu.RUnlock()
+
+		if node == nil {
+			return nil, nil, fmt.Errorf("节点 %q 当前不可用", session.NodeID)
+		}
+
+		copySession := *session
+		return &copySession, node, nil
+	}
+
+	// 2. 本地没找到，进行降级读取并做缓存回填（带读锁不阻碍本节点的操作或可先解锁）
+	// 这里为了简单，维持原有的 c.mu.RLock 控制即可
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -573,6 +595,9 @@ func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, NodeClie
 	if !ok {
 		return nil, nil, fmt.Errorf("用户 %q 当前不在线", username)
 	}
+
+	c.localSessions.Store(username, session)
+
 	node := c.nodes[session.NodeID]
 	if node == nil {
 		return nil, nil, fmt.Errorf("节点 %q 当前不可用", session.NodeID)
@@ -968,6 +993,13 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 		if session.NodeID == nodeID {
 			session.NodeID = c.owners[session.MapID]
 			c.store.SaveGlobalSession(session)
+
+			// 节点失效时的补救：更新内存缓存
+			if val, ok := c.localSessions.Load(session.Username); ok {
+				cachedSession := val.(*storage.GlobalSession)
+				cachedSession.NodeID = session.NodeID
+				c.localSessions.Store(session.Username, cachedSession)
+			}
 		}
 	}
 	// 【新增】从注册表中物理移除该失效节点

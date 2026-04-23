@@ -105,7 +105,7 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 		}
 	}()
 
-	ticker := time.NewTicker(200 * time.Millisecond)
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
 	// 心跳/状态推送协程
