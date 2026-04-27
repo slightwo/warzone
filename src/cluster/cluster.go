@@ -70,6 +70,10 @@ type Cluster struct {
 	mapCacheMu sync.RWMutex
 	mapCache   map[string]MapCacheData
 
+	bossCacheMu sync.RWMutex
+	bossCache   protocol.BossState
+	bossHpCache int32
+
 	// to understand事件分离：纯内存通道，各个无状态网关实例自行订阅并缓冲
 	eventMu      sync.RWMutex
 	globalEvents []string
@@ -492,7 +496,11 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	configs := c.configs
 	c.mu.RUnlock()
 
-	bState, hp, _ := c.store.LoadGlobalBoss()
+	c.bossCacheMu.RLock()
+	bState := c.bossCache
+	hp := c.bossHpCache
+	c.bossCacheMu.RUnlock()
+
 	respawnIn := 0
 	if !bState.Alive {
 		respawnIn = int(time.Until(bState.RespawnAt).Seconds())
@@ -805,6 +813,18 @@ func (c *Cluster) mapCacheLoop() {
 			var wg sync.WaitGroup
 			var cacheMu sync.Mutex
 			newCache := make(map[string]MapCacheData)
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				bState, hp, err := c.store.LoadGlobalBoss()
+				if err == nil {
+					c.bossCacheMu.Lock()
+					c.bossCache = bState
+					c.bossHpCache = hp
+					c.bossCacheMu.Unlock()
+				}
+			}()
 
 			for mapID, ownerID := range owners {
 				host := nodes[ownerID]
