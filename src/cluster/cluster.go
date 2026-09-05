@@ -515,6 +515,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	}
 
 	if node == nil {
+		protocol.FreeWorldState(ws)
 		return nil, errors.New("当前承载节点已不可用")
 	}
 
@@ -528,6 +529,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	c.mapCacheMu.RUnlock()
 
 	if !mapOk || cachedCurrent.View == nil {
+		protocol.FreeWorldState(ws)
 		return nil, fmt.Errorf("地图状态正在同步中，请稍候")
 	}
 	mapView := *cachedCurrent.View

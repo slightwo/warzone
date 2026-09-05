@@ -265,7 +265,7 @@ func FreeWorldState(ws *WorldState) {
 	if ws == nil {
 		return
 	}
-	// 帮助垃圾回收器清理切片内的对象引用
+	// 帮助垃圾回收器清理切片内的对象引用（截断以复用底层数组）
 	ws.Maps = ws.Maps[:0]
 	ws.Nodes = ws.Nodes[:0]
 	ws.Events = ws.Events[:0]
@@ -274,5 +274,16 @@ func FreeWorldState(ws *WorldState) {
 	ws.Map.NPCs = ws.Map.NPCs[:0]
 	ws.Map.Treasures = ws.Map.Treasures[:0]
 	ws.Boss.Sites = ws.Boss.Sites[:0]
+	// 清零标量字段，避免对象复用时携带陈旧数据
+	ws.Self = PlayerView{} // PlayerView 全标量，无切片，可整体覆盖
+	ws.Map.ID, ws.Map.Name, ws.Map.NodeID = "", "", ""
+	ws.Map.Width, ws.Map.Height = 0, 0
+	ws.Map.Version = 0
+	ws.Boss.Name, ws.Boss.LastHit = "", ""
+	ws.Boss.HP, ws.Boss.MaxHP = 0, 0
+	ws.Boss.Alive = false
+	ws.Boss.RespawnIn, ws.Boss.AttackGap = 0, 0
+	ws.Boss.Version = 0
+	ws.SessionVersion = 0
 	worldStatePool.Put(ws)
 }
