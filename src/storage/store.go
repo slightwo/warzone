@@ -18,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-var storeAddr = "10.105.18.252"
+var storeAddr = "172.31.50.252"
 
 type Store struct {
 	db  *gorm.DB
@@ -26,6 +26,12 @@ type Store struct {
 	ctx context.Context
 }
 
+type GlobalSession struct {
+	Username string `json:"username"`
+	MapID    string `json:"map_id"`
+	NodeID   string `json:"node_id"`
+	Version  int64  `json:"version"`
+}
 type UserRecord struct {
 	Username     string `gorm:"primaryKey"`
 	PasswordHash string
@@ -286,13 +292,6 @@ func (s *Store) GetActiveNodes() ([]NodeRegistryInfo, error) {
 		}
 	}
 	return nodes, nil
-}
-
-type GlobalSession struct {
-	Username string `json:"username"`
-	MapID    string `json:"map_id"`
-	NodeID   string `json:"node_id"`
-	Version  int64  `json:"version"`
 }
 
 func (s *Store) SaveGlobalSession(session GlobalSession) error {

@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warzone - Live Map Visualization</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #1e1e1e; 
+            color: #d4d4d4; 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+        }
+        #sidebar {
+            width: 300px;
+            padding: 20px;
+            background: #252526;
+            border-right: 1px solid #333;
+            height: 100vh;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+        #main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+        }
+        h2, h3 { margin-top: 0; color: #569cd6; }
+        .stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
+        .stat-label { color: #9cdcfe; }
+        .stat-value { font-weight: bold; }
+        canvas { 
+            background: #111; 
+            border: 2px solid #555; 
+            margin-top: 20px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            /* Scaling factor for rendering */
+            width: 896px; /* 56 * 16 */
+            height: 384px; /* 24 * 16 */
+            image-rendering: pixelated;
+        }
+        #status {
+            padding: 10px;
+            margin-top: 20px;
+            border-radius: 4px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .status-connecting { background: #d7ba7d; color: #1e1e1e; }
+        .status-connected { background: #608b4e; color: #fff; }
+        .status-error { background: #f48771; color: #fff; }
+        
+        .events-log {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #ce9178;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #444;
+            padding: 10px;
+            background: #1e1e1e;
+        }
+        .event-item { margin-bottom: 4px; }
+        .controls { margin-top: 15px; display: flex; flex-direction: column; gap: 8px; }
+        .controls button {
+            background: #0e639c; color: white; border: none; padding: 6px; cursor: pointer;
+            border-radius: 3px; font-weight: bold;
+        }
+        .controls button:hover { background: #1177bb; }
+        .controls button.map-btn { background: #4d4d4d; }
+        .controls button.map-btn:hover { background: #666; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h2>Warzone Link</h2>
+        <div id="status" class="status-connecting">Connecting to Gateway...</div>
+        
+        <div style="margin-top: 20px;" id="player-info" style="display:none;">
+            <h3>My Status</h3>
+            <div class="stat-row"><span class="stat-label">Server</span> <span class="stat-value" id="val-map">--</span></div>
+            <div class="stat-row"><span class="stat-label">Position</span> <span class="stat-value" id="val-pos">--</span></div>
+            <div class="stat-row"><span class="stat-label">HP</span> <span class="stat-value" id="val-hp">--</span></div>
+            <div class="stat-row"><span class="stat-label">Attack</span> <span class="stat-value" id="val-atk">--</span></div>
+            <div class="stat-row"><span class="stat-label">Potions</span> <span class="stat-value" id="val-potions">--</span></div>
+            <div class="stat-row"><span class="stat-label">Treasures</span> <span class="stat-value" id="val-treasures">--</span></div>
+            <div class="stat-row"><span class="stat-label">Kills</span> <span class="stat-value" id="val-kills">--</span></div>
+            
+            <div class="controls">
+                <button onclick="sendAction({type: 'attack'})">Attack (Space)</button>
+                <button onclick="sendAction({type: 'heal'})">Heal (H)</button>
+                <button onclick="sendAction({type: 'shop', item: 'potion'})">Buy Potion ($3)</button>
+                <button onclick="sendAction({type: 'shop', item: 'weapon'})">Buy Weapon ($8)</button>
+            </div>
+
+            <h3 style="margin-top:20px">Boss Status</h3>
+            <div class="stat-row"><span class="stat-label">Boss HP</span> <span class="stat-value" id="val-bosshp">--</span></div>
+            <div class="controls">
+                <button onclick="sendAction({type: 'boss_attack'})" style="background:#800000">Attack Boss (B)</button>
+            </div>
+
+            <h3 style="margin-top:20px">World Maps</h3>
+            <div id="map-list" class="controls"></div>
+        </div>
+
+        <div class="events-log" id="events-log"></div>
+    </div>
+
+    <div id="main">
+        <!-- 56 x 24 map logical size. 16px per grid unit -->
+        <canvas id="gameCanvas" width="896" height="384"></canvas>
+        <p style="color: #888; margin-top: 10px;">Rendered locally via WebSockets &middot; Grid: 56x24</p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const eventLog = document.getElementById('events-log');
+        const CELL_SIZE = 16; 
+        
+        let currentState = null;
+        let selfUsername = "";
+
+        // UI refs
+        const refs = {
+            status: document.getElementById('status'),
+            map: document.getElementById('val-map'),
+            pos: document.getElementById('val-pos'),
+            hp: document.getElementById('val-hp'),
+            atk: document.getElementById('val-atk'),
+            potions: document.getElementById('val-potions'),
+            treasures: document.getElementById('val-treasures'),
+            kills: document.getElementById('val-kills'),
+            bosshp: document.getElementById('val-bosshp'),
+            playerInfo: document.getElementById('player-info'),
+            mapList: document.getElementById('map-list')
+        };
+
+        function sendAction(msg) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify(msg));
+            }
+        }
+
+        function addEvent(msg) {
+            const el = document.createElement('div');
+            el.className = 'event-item';
+            el.innerText = `> ${msg}`;
+            eventLog.prepend(el); // add to top
+            if (eventLog.children.length > 50) {
+                eventLog.removeChild(eventLog.lastChild);
+            }
+        }
+
+        function setStatus(text, type) {
+            refs.status.innerText = text;
+            refs.status.className = `status-${type}`;
+        }
+
+        // Initialize WebSocket
+        const ws = new WebSocket("ws://localhost:9091/ws");
+        
+        ws.onopen = () => {
+            setStatus("Connected!", "connected");
+            
+            // Send quick enter
+            selfUsername = "web_user_" + Math.floor(Math.random() * 9000 + 1000);
+            addEvent(`Joined as ${selfUsername}`);
+            
+            ws.send(JSON.stringify({ 
+                type: "quick_enter", 
+                username: selfUsername, 
+                password: "123" 
+            }));
+        };
+        
+        ws.onclose = () => {
+            setStatus("Disconnected", "error");
+            addEvent("Connection to server lost.");
+        };
+        
+        ws.onerror = (e) => {
+            setStatus("Error", "error");
+        };
+
+        ws.onmessage = (e) => {
+            try {
+                const msg = JSON.parse(e.data);
+                
+                if (msg.type === "state" && msg.state) {
+                    currentState = msg.state;
+                    updateUI(currentState);
+                    
+                    // Show events if any
+                    if (msg.state.events && msg.state.events.length > 0) {
+                        msg.state.events.forEach(addEvent);
+                    }
+                } 
+                else if (msg.type === "error") {
+                    addEvent(`ERROR: ${msg.error}`);
+                }
+            } catch (err) {
+                console.error("Message parse error", err);
+            }
+        };
+
+        function updateUI(state) {
+            refs.playerInfo.style.display = 'block';
+            if (state.self) {
+                refs.map.innerText = state.map ? state.map.name : state.self.map_id;
+                refs.pos.innerText = `[${state.self.x}, ${state.self.y}]`;
+                refs.hp.innerText = `${state.self.hp} / ${state.self.max_hp}`;
+                refs.atk.innerText = state.self.attack;
+                refs.potions.innerText = `${state.self.potions} (H to use)`;
+                refs.treasures.innerText = state.self.treasures;
+                refs.kills.innerText = state.self.kills;
+            }
+            if (state.boss) {
+                refs.bosshp.innerText = state.boss.alive ? `${state.boss.hp} / ${state.boss.max_hp}` : "Defeated";
+            }
+            if (state.maps) {
+                let html = '';
+                state.maps.forEach(m => {
+                    const isCurrent = state.map && m.id === state.map.id;
+                    const bg = isCurrent ? 'background:#0e639c' : '';
+                    html += `<button class="map-btn" style="${bg}" onmousedown="sendAction({type: 'switch_map', map_id: '${m.id}'});">${m.name} (${m.players} P, ${m.npcs} N)</button>`;
+                });
+                if (refs.mapList.innerHTML !== html) {
+                    refs.mapList.innerHTML = html;
+                }
+            }
+        }
+
+        // Keyboard Controls
+        window.addEventListener('keydown', (e) => {
+            if (!currentState || !currentState.self || currentState.self.hp <= 0) return;
+            
+            let dir = null;
+            if (e.key === 'ArrowUp' || e.key === 'w') dir = 'up';
+            if (e.key === 'ArrowDown' || e.key === 's') dir = 'down';
+            if (e.key === 'ArrowLeft' || e.key === 'a') dir = 'left';
+            if (e.key === 'ArrowRight' || e.key === 'd') dir = 'right';
+            
+            if (dir) {
+                sendAction({ type: 'move', dir: dir });
+            }
+            
+            if (e.key === ' ') { // Space to attack
+                sendAction({ type: 'attack' });
+                e.preventDefault(); // prevent scrolling
+            }
+            if (e.key === 'b' || e.key === 'B') {
+                sendAction({ type: 'boss_attack' });
+            }
+            if (e.key === 'h' || e.key === 'H') {
+                sendAction({ type: 'heal' });
+            }
+        });
+
+        // Rendering Loop
+        function draw() {
+            // Clear background
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            if (!currentState || !currentState.map) {
+                requestAnimationFrame(draw);
+                return;
+            }
+
+            const activeMap = currentState.map;
+
+            // Draw grid lines
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1;
+            for(let x=0; x<=activeMap.width; x++) {
+                ctx.beginPath(); ctx.moveTo(x * CELL_SIZE, 0); ctx.lineTo(x * CELL_SIZE, activeMap.height * CELL_SIZE); ctx.stroke();
+            }
+            for(let y=0; y<=activeMap.height; y++) {
+                ctx.beginPath(); ctx.moveTo(0, y * CELL_SIZE); ctx.lineTo(activeMap.width * CELL_SIZE, y * CELL_SIZE); ctx.stroke();
+            }
+
+            // Draw Terrain
+            if (activeMap.terrain && activeMap.terrain.length > 0) {
+                for (let y = 0; y < activeMap.terrain.length; y++) {
+                    const row = activeMap.terrain[y];
+                    if (!row) continue;
+                    for (let x = 0; x < row.length; x++) {
+                        const tile = row[x];
+                        let color = null;
+                        switch (tile) {
+                            case '#': color = '#4a4a4a'; break; // 墙壁/障碍 (灰)
+                            case '~': color = '#1a4e76'; break; // 水域 (深蓝)
+                            case 'T': color = '#2d5a27'; break; // 树木/森林 (深绿)
+                            case '^': color = '#6b6659'; break; // 山脉 (褐灰)
+                            case '.': color = '#1c211b'; break; // 草地 (墨绿)
+                        }
+                        if (color) {
+                            ctx.fillStyle = color;
+                            ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                        }
+                    }
+                }
+            }
+
+            // Draw Boss Site (if any)
+            if (currentState.boss && currentState.boss.sites) {
+                for (let site of currentState.boss.sites) {
+                    if (site.map_id === activeMap.id) {
+                        // Boss territory/aggro range (7x7)
+                        ctx.fillStyle = currentState.boss.alive ? 'rgba(255, 0, 0, 0.1)' : 'rgba(100, 100, 100, 0.1)';
+                        ctx.fillRect((site.x - 3) * CELL_SIZE, (site.y - 3) * CELL_SIZE, CELL_SIZE * 7, CELL_SIZE * 7);
+                        
+                        if (currentState.boss.alive) {
+                            // Boss Body (3x3 grid size)
+                            const bx = (site.x - 1) * CELL_SIZE;
+                            const by = (site.y - 1) * CELL_SIZE;
+                            const bw = CELL_SIZE * 3;
+                            
+                            ctx.fillStyle = '#aa0000'; // Dark Red
+                            ctx.fillRect(bx, by, bw, bw);
+                            
+                            // Boss Name Text
+                            ctx.fillStyle = 'white';
+                            ctx.font = 'bold 12px Arial';
+                            ctx.textAlign = 'center';
+                            ctx.fillText(currentState.boss.name || "BOSS", bx + bw/2, by - 12);
+                            
+                            // Boss HP Bar
+                            const hpRatio = Math.max(0, currentState.boss.hp / currentState.boss.max_hp);
+                            ctx.fillStyle = 'red';
+                            ctx.fillRect(bx, by - 6, bw, 5);
+                            ctx.fillStyle = 'lime';
+                            ctx.fillRect(bx, by - 6, bw * hpRatio, 5);
+                        }
+                    }
+                }
+            }
+
+            // Draw Treasures
+            if (activeMap.treasures) {
+                activeMap.treasures.forEach(t => {
+                    ctx.fillStyle = 'gold';
+                    ctx.beginPath();
+                    ctx.arc((t.x + 0.5) * CELL_SIZE, (t.y + 0.5) * CELL_SIZE, CELL_SIZE * 0.3, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+
+            // Draw NPCs
+            if (activeMap.npcs) {
+                activeMap.npcs.forEach(npc => {
+                    ctx.fillStyle = 'purple';
+                    ctx.fillRect(npc.x * CELL_SIZE + 2, npc.y * CELL_SIZE + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+                });
+            }
+
+            // Draw Players
+            if (activeMap.players) {
+                activeMap.players.forEach(p => {
+                    const isSelf = p.username === selfUsername;
+                    
+                    // Body
+                    ctx.fillStyle = isSelf ? '#569cd6' : '#d7ba7d'; // Blue for self, Yellow for others
+                    ctx.fillRect(p.x * CELL_SIZE + 2, p.y * CELL_SIZE + 2, CELL_SIZE - 4, CELL_SIZE - 4);
+
+                    // Dead indicator
+                    if (p.hp <= 0) {
+                        ctx.strokeStyle = 'red';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(p.x * CELL_SIZE, p.y * CELL_SIZE);
+                        ctx.lineTo((p.x + 1) * CELL_SIZE, (p.y + 1) * CELL_SIZE);
+                        ctx.moveTo((p.x + 1) * CELL_SIZE, p.y * CELL_SIZE);
+                        ctx.lineTo(p.x * CELL_SIZE, (p.y + 1) * CELL_SIZE);
+                        ctx.stroke();
+                    }
+
+                    // HP Bar
+                    if (p.hp > 0) {
+                        const hpRatio = p.hp / p.max_hp;
+                        ctx.fillStyle = 'red';
+                        ctx.fillRect(p.x * CELL_SIZE, p.y * CELL_SIZE - 4, CELL_SIZE, 3);
+                        ctx.fillStyle = 'lime';
+                        ctx.fillRect(p.x * CELL_SIZE, p.y * CELL_SIZE - 4, CELL_SIZE * hpRatio, 3);
+                    }
+
+                    // Name tag
+                    ctx.fillStyle = 'white';
+                    ctx.font = '10px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(p.username.replace("web_user_", "u"), (p.x + 0.5) * CELL_SIZE, p.y * CELL_SIZE - 6);
+                });
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        // Start render loop
+        draw();
+    </script>
+</body>
+</html>

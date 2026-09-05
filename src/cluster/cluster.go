@@ -406,34 +406,39 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 	c.mu.RUnlock()
 
 	profile, ok, err = src_node.RemovePlayer(context.Background(), session.MapID, username)
-
 	if err != nil {
-		return nil, fmt.Errorf("源节点RPC移除玩家异常: %v", err)
+		return nil, fmt.Errorf("源节点RPC移除玩家异常 (Try失败): %v", err)
 	}
 	if !ok {
-		return nil, errors.New("源节点移除玩家失败")
+		return nil, errors.New("源节点移除玩家失败 (Try被拒绝)")
 	}
 
-	_, stillExists, err := src_node.Profile(context.Background(), session.MapID, username)
-	if err != nil {
-		fmt.Printf("[ERROR] 源节点RPC验证玩家存在异常: %v\n", err)
-	} else if stillExists {
-		fmt.Printf("[WARN] 移除后玩家仍然存在于源地图！\n")
-	}
-
+	// 执行 TCC 逻辑的 Confirm / Cancel 阶段
+	// 尝试向目标节点写入 (Confirm)
 	if err := dst.AddPlayer(context.Background(), targetMap, &profile); err != nil {
-		return nil, fmt.Errorf("目标节点添加玩家失败: %v", err)
+		// Cancel 阶段: 目标写入失败，必须进行业务回滚，将玩家恢复至原源节点
+		fmt.Printf("[!!!严重警告!!!] 玩家 %s 切换地图 %s 在目标节点写入失败 (%v)，开始执行 TCC 回滚...\n", username, targetMap, err)
+
+		rollbackErr := src_node.AddPlayer(context.Background(), session.MapID, &profile)
+		if rollbackErr != nil {
+			// 如果回滚也失败了，说明遇到了罕见的网络断裂或极端的双主脑裂，玩家数据暂时丢失在以太空间，需要后续的人工或后台守护进程修复
+			fmt.Printf("[FATAL 灾难] 玩家 %s TCC 回滚失败 ! 补偿写入原节点也失败了 : %v\n", username, rollbackErr)
+		} else {
+			fmt.Printf("[INFO] 玩家 %s TCC 回滚成功，状态已恢复至原节点\n", username)
+		}
+		return nil, fmt.Errorf("目标节点添加玩家失败，切换已回滚: %v", err)
 	}
+
+	// Double-check (非必须，但加固防御): 验证目标节点写入已确认
 	profile, ok, err = dst.Profile(context.Background(), targetMap, username)
-	if err != nil {
-		return nil, fmt.Errorf("获取移动后用户信息异常: %v", err)
-	}
-	if !ok {
-		return nil, errors.New("获取移动后用户信息失败")
+	if err != nil || !ok {
+		// 读不到可能表明刚写入就被挤掉或者网络问题
+		return nil, fmt.Errorf("获取移动后用户信息异常 (Confirm阶段校验未通过): %v", err)
 	}
 
 	profile.LastMap = targetMap
 	profile.LastNode = dst_node
+
 	c.mu.Lock()
 	session, ok = c.store.LoadGlobalSession(username)
 	if ok && session != nil {
@@ -443,14 +448,12 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 		_ = c.store.SaveGlobalSession(*session)
 		c.localSessions.Store(username, session) // 跨节点切图成功，更新本地缓存
 	}
-
 	c.mu.Unlock()
 
 	if ok && session != nil {
 		c.pushEvent(session.Username, fmt.Sprintf("切换到地图 %s", targetMap))
 	}
 	_ = c.store.SaveProfile(profile)
-	// _ = c.persistSessionState(username) // Removed
 
 	return c.SnapshotFor(username)
 	// 1. 从源节点摘除玩家热状态。
@@ -622,14 +625,6 @@ func (c *Cluster) pushEvent(username, event string) {
 	_ = c.store.PublishEvent("events:user:"+username, event)
 }
 
-// to under
-func (c *Cluster) pushEventLocked(session *storage.GlobalSession, event string) {
-	if event == "" {
-		return
-	}
-	_ = c.store.PublishEvent("events:user:"+session.Username, event)
-}
-
 func (c *Cluster) broadcastGlobalEvent(event string) {
 	if event == "" {
 		return
@@ -719,7 +714,7 @@ func (c *Cluster) discoveryLoop() {
 					}
 					c.nodes[nInfo.ID] = client
 
-					// 【基于用户前提假设：保证无冲突抢占】分配该节点声明的各种地图映射
+					// 【前提假设：保证无冲突抢占】分配该节点声明的各种地图映射
 					for _, mapID := range nInfo.Maps {
 						cfg := c.configs[mapID]
 						if cfg.ID != "" {
@@ -792,7 +787,7 @@ func (c *Cluster) backgroundLoop() {
 }
 
 func (c *Cluster) mapCacheLoop() {
-	ticker := time.NewTicker(200 * time.Millisecond)
+	ticker := time.NewTicker(150 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
