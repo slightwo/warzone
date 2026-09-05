@@ -31,9 +31,6 @@ type NodeClient interface {
 	Start() error
 	Stop() error
 	Ping(ctx context.Context) error
-	RemoveHostedMap(mapID string)
-	InstallPrimaryMap(cfg world.MapConfig)
-	RestorePrimaryMap(cfg world.MapConfig, cp protocol.MapCheckpoint)
 	AddPlayer(ctx context.Context, mapID string, profile *protocol.UserProfile) error
 	RemovePlayer(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error)
 	MovePlayer(ctx context.Context, mapID, username, dir string) (string, protocol.UserProfile, bool, error)
@@ -46,8 +43,6 @@ type NodeClient interface {
 	Snapshot(ctx context.Context, mapID string) (protocol.MapView, error)
 	Counts(ctx context.Context, mapID string) (int, int, int, int64, error)
 	Checkpoint(ctx context.Context, mapID string) (protocol.MapCheckpoint, error)
-	BackgroundStep() []protocol.MapEvents
-	StoreReplica(cp protocol.MapCheckpoint)
 	Promote(mapID string, cfg world.MapConfig) error
 	View() protocol.NodeView
 	IsHealthy() bool
@@ -130,45 +125,17 @@ func (c *Cluster) Start() error {
 	}
 	go c.mapCacheLoop()
 	go c.discoveryLoop()
-	go c.backgroundLoop()
 	go c.heartbeatLoop()
-	go c.checkpointLoop()
 	return nil
 }
 func (c *Cluster) Close() {
-	c.mu.RLock()
-	// 获取所有地图的 owner 和 replica 映射
-	owners := make(map[string]string)
-	for mapID, ownerID := range c.owners {
-		owners[mapID] = ownerID
+	// 节点自治后，协调器关闭时无需再抓 checkpoint 落盘（节点自落盘、副本自拉）。
+	// 仅通知各后台循环退出。
+	select {
+	case <-c.stopCh:
+	default:
+		close(c.stopCh)
 	}
-	replicas := make(map[string]string)
-	for mapID, replicaID := range c.replicas {
-		replicas[mapID] = replicaID
-	}
-	c.mu.RUnlock()
-
-	for mapID, nodeID := range owners {
-		owner := c.nodes[nodeID]
-		if owner == nil || !owner.IsHealthy() {
-			continue
-		}
-		CP, err := owner.Checkpoint(context.Background(), mapID)
-		if err != nil {
-			log.Printf("[checkpoint] 抓取地图 %s 快照失败: %v", mapID, err)
-			continue
-		}
-		CP.Players = []protocol.PlayerView{}
-		if err := c.store.SaveCheckpoint(CP); err != nil {
-			log.Printf("[checkpoint] 保存地图 %s 快照失败: %v", mapID, err)
-		}
-		replicaID := replicas[mapID]
-		replica := c.nodes[replicaID]
-		if replica != nil && replica.IsHealthy() {
-			replica.StoreReplica(CP)
-		}
-	}
-
 }
 func (c *Cluster) Register(username, password, confirm string) error {
 	if confirm == "" {
@@ -727,54 +694,11 @@ func (c *Cluster) discoveryLoop() {
 					}
 					c.mu.Unlock()
 
-					// 最后：无锁状态下进行地图数据重建、向 Node 推送快照(这是高耗时网络传输)
-					for _, mapID := range nInfo.Maps {
-						cfg := c.configs[mapID]
-						if cfg.ID != "" {
-							if cp, ok := c.store.LoadCheckpoint(mapID); ok {
-								client.RestorePrimaryMap(cfg, *cp)
-							} else {
-								client.InstallPrimaryMap(cfg)
-							}
-						}
-					}
+					// 节点自治：地图数据由节点启动时自拉 checkpoint 恢复（见 cmd/node/main.go），
+					// 协调器不再向节点推送快照。
 				}(info)
 			}
 
-		case <-c.stopCh:
-			return
-		}
-	}
-}
-
-func (c *Cluster) backgroundLoop() {
-	ticker := time.NewTicker(700 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			nodeIDs := make([]string, 0, len(c.nodes))
-			c.mu.RLock()
-			for nodeID, node := range c.nodes {
-				if node.IsHealthy() {
-					nodeIDs = append(nodeIDs, nodeID)
-				}
-			}
-			sort.Strings(nodeIDs)
-			nodes := make([]NodeClient, 0, len(nodeIDs))
-			for _, nodeID := range nodeIDs {
-				nodes = append(nodes, c.nodes[nodeID])
-			}
-			c.mu.RUnlock()
-
-			for _, node := range nodes {
-				for _, bundle := range node.BackgroundStep() {
-					for _, event := range bundle.Events {
-						c.broadcastMapEvent(bundle.MapID, event)
-					}
-				}
-			}
 		case <-c.stopCh:
 			return
 		}
@@ -915,61 +839,6 @@ func (c *Cluster) heartbeatLoop() {
 	}
 }
 
-func (c *Cluster) checkpointLoop() {
-	ticker := time.NewTicker(700 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-
-			c.mu.RLock()
-			// 获取所有地图的 owner 和 replica 映射
-			owners := make(map[string]string)
-			for mapID, ownerID := range c.owners {
-				owners[mapID] = ownerID
-			}
-			replicas := make(map[string]string)
-			for mapID, replicaID := range c.replicas {
-				replicas[mapID] = replicaID
-			}
-			c.mu.RUnlock()
-
-			for mapID, nodeID := range owners {
-				owner := c.nodes[nodeID] //c.nodes是静态的，不存在被修改的风险
-				if owner == nil || !owner.IsHealthy() {
-					continue
-				}
-				CP, err := owner.Checkpoint(context.Background(), mapID)
-				if err != nil {
-					log.Printf("[checkpoint] 抓取地图 %s 快照失败: %v", mapID, err)
-					continue
-				}
-
-				if err := c.store.SaveCheckpoint(CP); err != nil {
-					log.Printf("[checkpoint] 保存地图 %s 快照失败: %v", mapID, err)
-				}
-				replicaID := replicas[mapID]
-				replica := c.nodes[replicaID]
-				if replica != nil && replica.IsHealthy() {
-					replica.StoreReplica(CP)
-				}
-			}
-
-		case <-c.stopCh:
-			return
-		}
-	}
-
-	// 这里要实现“主节点定期生成检查点，并复制给副本节点”。
-	// 至少要包含：
-	// 1. 从 owners 找到每张地图当前主节点。
-	// 2. 抓取主节点地图快照。
-	// 3. 同时写入本地检查点存储与 replica 节点内存。
-	// 4. 跳过故障节点，避免把坏状态继续扩散。
-
-}
-
 func (c *Cluster) handleNodeFailure(nodeID string) {
 	c.mu.Lock()
 	var map2Change []string
@@ -1087,10 +956,8 @@ func (c *Cluster) failNode(nodeID string) (string, error) {
 		if err != nil {
 			continue
 		}
+		// 故障转移前确保 Redis 有最新快照；副本由各自 replicaSyncLoop 自拉。
 		_ = c.store.SaveCheckpoint(cp)
-		if replica, ok := c.nodes[replicas[mapID]]; ok {
-			replica.StoreReplica(cp)
-		}
 	}
 	if err := node.Stop(); err != nil {
 		return "", err
@@ -1118,10 +985,8 @@ func (c *Cluster) recoverNode(nodeID string) (string, error) {
 		if ownerID == nodeID {
 			continue
 		}
-		if cp, ok := c.store.LoadCheckpoint(mapID); ok {
-			node.StoreReplica(*cp)
-			c.replicas[mapID] = nodeID
-		}
+		// 副本数据由节点 replicaSyncLoop 自拉，此处只恢复副本拓扑关系。
+		c.replicas[mapID] = nodeID
 	}
 	c.mu.Unlock()
 

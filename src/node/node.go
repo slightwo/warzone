@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"sort"
 	"sync"
@@ -23,6 +24,7 @@ type NodeService struct {
 	lastHeartbeat    time.Time
 	maps             map[string]*world.World
 	replicaSnapshots map[string]protocol.MapCheckpoint
+	replicaMaps      map[string]struct{}
 	ln               net.Listener
 	stopCh           chan struct{}
 }
@@ -36,6 +38,7 @@ func NewNodeService(id, addr string, store *storage.Store) *NodeService {
 		lastHeartbeat:    time.Now(),
 		maps:             make(map[string]*world.World),
 		replicaSnapshots: make(map[string]protocol.MapCheckpoint),
+		replicaMaps:      make(map[string]struct{}),
 		stopCh:           make(chan struct{}),
 	}
 }
@@ -57,6 +60,8 @@ func (n *NodeService) Start() error {
 	n.mu.Unlock()
 
 	go n.flushLoop()
+	go n.tickLoop()
+	go n.replicaSyncLoop()
 	return nil
 }
 
@@ -120,6 +125,84 @@ func (n *NodeService) RemoveHostedMap(mapID string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	delete(n.maps, mapID)
+}
+
+// AddReplicaMap 登记本节点托管的副本地图（由 -replicas 启动参数传入）。
+// 副本数据由 replicaSyncLoop 定期从 Redis 拉取，无需协调器推送。
+func (n *NodeService) AddReplicaMap(mapID string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.replicaMaps[mapID] = struct{}{}
+}
+
+// tickLoop 是节点自治的核心：驱动世界模拟、发布事件、自落盘 checkpoint。
+// 取代原先协调器 backgroundLoop / checkpointLoop 的「远程驱动」。
+func (n *NodeService) tickLoop() {
+	ticker := time.NewTicker(700 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if n.store == nil {
+				continue
+			}
+			n.mu.RLock()
+			instances := make(map[string]*world.World, len(n.maps))
+			for mapID, instance := range n.maps {
+				instances[mapID] = instance
+			}
+			n.mu.RUnlock()
+
+			for mapID, instance := range instances {
+				// 1. 世界模拟，事件直发 Redis（不再回传协调器）
+				for _, event := range instance.BackgroundStep() {
+					if err := n.store.PublishEvent("events:map:"+mapID, event); err != nil {
+						log.Printf("[tick] 发布地图 %s 事件失败: %v", mapID, err)
+					}
+				}
+				// 2. 自落盘 checkpoint（对称 1.1 的自拉恢复）
+				cp := instance.CaptureCheckpoint(n.ID)
+				if err := n.store.SaveCheckpoint(cp); err != nil {
+					log.Printf("[tick] 保存地图 %s 快照失败: %v", mapID, err)
+				}
+			}
+		case <-n.stopCh:
+			return
+		}
+	}
+}
+
+// replicaSyncLoop 副本自拉：定期从 Redis 拉取副本地图的最新快照，
+// 供主节点故障时 Promote 使用。对标 Redis/MySQL 主从的「从库拉取」模式。
+func (n *NodeService) replicaSyncLoop() {
+	ticker := time.NewTicker(700 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if n.store == nil {
+				continue
+			}
+			n.mu.RLock()
+			replicaMapIDs := make([]string, 0, len(n.replicaMaps))
+			for mapID := range n.replicaMaps {
+				replicaMapIDs = append(replicaMapIDs, mapID)
+			}
+			n.mu.RUnlock()
+
+			for _, mapID := range replicaMapIDs {
+				if cp, ok := n.store.LoadCheckpoint(mapID); ok && cp.Version > 0 {
+					n.mu.Lock()
+					n.replicaSnapshots[mapID] = *cp
+					n.mu.Unlock()
+				}
+			}
+		case <-n.stopCh:
+			return
+		}
+	}
 }
 
 func (n *NodeService) InstallPrimaryMap(cfg world.MapConfig) {

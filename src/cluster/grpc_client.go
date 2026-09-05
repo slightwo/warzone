@@ -194,32 +194,8 @@ func (c *NodeGRPCClient) Checkpoint(ctx context.Context, mapID string) (protocol
 // Dummy implementations for lifecycle and map management methods
 // to satisfy NodeClient interface. In Stage 5, these will be true RPCs or ignored.
 
-func (c *NodeGRPCClient) Start() error                                                     { return nil }
-func (c *NodeGRPCClient) Stop() error                                                      { return nil }
-func (c *NodeGRPCClient) RemoveHostedMap(mapID string)                                     {}
-func (c *NodeGRPCClient) InstallPrimaryMap(cfg world.MapConfig)                            {} // Need to use proper typings if needed, actually it's world.MapConfig.
-func (c *NodeGRPCClient) RestorePrimaryMap(cfg world.MapConfig, cp protocol.MapCheckpoint) {}
-func (c *NodeGRPCClient) BackgroundStep() []protocol.MapEvents {
-	resp, err := c.client.BackgroundStep(context.Background(), &pb.BackgroundStepReq{})
-	if err != nil || resp == nil {
-		return nil
-	}
-	res := make([]protocol.MapEvents, 0, len(resp.Events))
-	for _, e := range resp.Events {
-		res = append(res, protocol.MapEvents{
-			MapID:  e.MapId,
-			Events: append([]string(nil), e.Events...),
-		})
-	}
-	return res
-}
-
-func (c *NodeGRPCClient) StoreReplica(cp protocol.MapCheckpoint) {
-	req := &pb.StoreReplicaReq{
-		Checkpoint: protocol.ToProtoMapCheckpoint(cp),
-	}
-	_, _ = c.client.StoreReplica(context.Background(), req)
-}
+func (c *NodeGRPCClient) Start() error { return nil }
+func (c *NodeGRPCClient) Stop() error  { return nil }
 
 func (c *NodeGRPCClient) Promote(mapID string, cfg world.MapConfig) error {
 	req := &pb.PromoteReq{

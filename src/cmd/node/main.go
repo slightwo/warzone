@@ -81,6 +81,7 @@ func main() {
 		mapID = strings.TrimSpace(mapID)
 		if mapID != "" {
 			hostedReplicas = append(hostedReplicas, mapID)
+			ns.AddReplicaMap(mapID)
 			log.Printf("节点 [%s] 本地成功加载副本: %s", nodeID, mapID)
 		}
 	}
