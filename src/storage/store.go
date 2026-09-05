@@ -6,21 +6,19 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
-	"os/user"
-	"strconv"
+	"strings"
 	"time"
 
 	json "github.com/goccy/go-json"
 
+	"battleworld/config"
 	"battleworld/protocol"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
-
-var storeAddr = envOrDefault("BATTLEWORLD_STORE_ADDR", "127.0.0.1")
 
 type Store struct {
 	db  *gorm.DB
@@ -97,20 +95,17 @@ func fromDBUser(u UserRecord) protocol.UserProfile {
 }
 
 func NewStore(baseDir string) (*Store, error) {
-	// 连接 PostgreSQL (冷数据)
-	pgUser := envOrDefault("BATTLEWORLD_PGUSER", defaultPGUser())
-	pgPassword := os.Getenv("BATTLEWORLD_PGPASSWORD")
-	pgDBName := envOrDefault("BATTLEWORLD_PGDB", "battleworld")
-	pgPort := envOrDefault("BATTLEWORLD_PGPORT", "5432")
-
-	dsn := fmt.Sprintf("host=%s user=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Shanghai",
-		storeAddr, pgUser, pgDBName, pgPort)
-	if pgPassword != "" {
-		dsn += fmt.Sprintf(" password=%q", pgPassword)
+	// 数据库密码必须显式注入，避免把秘密写死在代码里。
+	if config.DBPassword() == "" {
+		return nil, errors.New("未设置 BW_DB_PASSWORD 或 BATTLEWORLD_PGPASSWORD 环境变量：请注入数据库密码后重试")
 	}
+
+	// 连接参数由环境变量注入，兼容 BW_* 与 BATTLEWORLD_* 命名。
+	dsn := fmt.Sprintf("host=%s user=%s password='%s' dbname=%s port=%s sslmode=disable TimeZone=Asia/Shanghai",
+		config.DBHost(), config.DBUser(), config.DBPassword(), config.DBName(), config.DBPort())
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		fmt.Printf("警告: 无法连接PostgreSQL (%v)!\n可能需要确保 PostgreSQL 在 %s:5432 运行\n", err, storeAddr)
+		fmt.Printf("警告: 无法连接PostgreSQL (%v)!\n可能需要确保 PostgreSQL 在 %s:%s 运行\n", err, config.DBHost(), config.DBPort())
 		return nil, err
 	}
 
@@ -130,24 +125,15 @@ func NewStore(baseDir string) (*Store, error) {
 	}
 
 	// 连接 Redis (热数据)
-	redisPort := envOrDefault("BATTLEWORLD_REDIS_PORT", "6379")
-	redisPassword := os.Getenv("BATTLEWORLD_REDIS_PASSWORD")
-	redisDB := 0
-	if dbStr := os.Getenv("BATTLEWORLD_REDIS_DB"); dbStr != "" {
-		if parsed, err := strconv.Atoi(dbStr); err == nil {
-			redisDB = parsed
-		}
-	}
-
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", storeAddr, redisPort),
-		Password: redisPassword,
-		DB:       redisDB,
+		Addr:     config.RedisAddr(),
+		Password: config.RedisPassword(),
+		DB:       config.RedisDB(),
 	})
 
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		fmt.Printf("警告: 无法连接Redis (%v)!\n可能需要确保 Redis 在 %s:6379 运行\n", err, storeAddr)
+		fmt.Printf("警告: 无法连接Redis (%v)!\n可能需要确保 Redis 在 %s 运行\n", err, config.RedisAddr())
 		return nil, err
 	}
 
@@ -170,9 +156,14 @@ func (s *Store) Register(username, password string) error {
 		return fmt.Errorf("用户 %q 已存在", username)
 	}
 
+	hashed, err := hashPassword(password)
+	if err != nil {
+		return err
+	}
+
 	p := protocol.UserProfile{
 		Username:     username,
-		PasswordHash: hashPassword(password),
+		PasswordHash: hashed,
 		LastMap:      "green",
 		X:            4,
 		Y:            4,
@@ -203,7 +194,7 @@ func (s *Store) Authenticate(username, password string) (*protocol.UserProfile, 
 		return nil, err
 	}
 
-	if user.PasswordHash != hashPassword(password) {
+	if !verifyPassword(user.PasswordHash, password) {
 		return nil, errors.New("密码错误")
 	}
 
@@ -275,26 +266,20 @@ func (s *Store) LoadCheckpoint(mapID string) (*protocol.MapCheckpoint, bool) {
 	return &cp, true
 }
 
-func hashPassword(password string) string {
+// hashPassword 生成 bcrypt 哈希；失败时返回 error。
+func hashPassword(password string) (string, error) {
+	b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(b), err
+}
+
+// verifyPassword 校验密码。兼容旧 SHA-256 哈希（以 "$2" 前缀区分 bcrypt）。
+func verifyPassword(hash, password string) bool {
+	if strings.HasPrefix(hash, "$2") {
+		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+	}
+	// 旧版无盐 SHA-256 兼容路径
 	sum := sha256.Sum256([]byte(password))
-	return hex.EncodeToString(sum[:])
-}
-
-func envOrDefault(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func defaultPGUser() string {
-	if value := os.Getenv("PGUSER"); value != "" {
-		return value
-	}
-	if current, err := user.Current(); err == nil && current.Username != "" {
-		return current.Username
-	}
-	return "postgres"
+	return hash == hex.EncodeToString(sum[:])
 }
 
 type NodeRegistryInfo struct {
@@ -313,21 +298,19 @@ func (s *Store) RegisterNode(info NodeRegistryInfo, ttl time.Duration) error {
 }
 
 func (s *Store) GetActiveNodes() ([]NodeRegistryInfo, error) {
-	keys, err := s.rdb.Keys(s.ctx, "battle:node:registry:*").Result()
-	if err != nil {
-		return nil, err
-	}
+	iter := s.rdb.Scan(s.ctx, 0, "battle:node:registry:*", 100).Iterator()
 	var nodes []NodeRegistryInfo
-	for _, k := range keys {
-		data, err := s.rdb.Get(s.ctx, k).Bytes()
-		if err == nil {
-			var info NodeRegistryInfo
-			if json.Unmarshal(data, &info) == nil {
-				nodes = append(nodes, info)
-			}
+	for iter.Next(s.ctx) {
+		data, err := s.rdb.Get(s.ctx, iter.Val()).Bytes()
+		if err != nil {
+			continue // 键可能在 SCAN 与 GET 之间过期，跳过
+		}
+		var info NodeRegistryInfo
+		if json.Unmarshal(data, &info) == nil {
+			nodes = append(nodes, info)
 		}
 	}
-	return nodes, nil
+	return nodes, iter.Err()
 }
 
 func (s *Store) SaveGlobalSession(session GlobalSession) error {
@@ -370,7 +353,6 @@ func (s *Store) GetAllGlobalSessions() ([]GlobalSession, error) {
 	return sessions, nil
 }
 
-// to under
 // PublishEvent sends a message to a specific pub/sub channel.
 func (s *Store) PublishEvent(channel, event string) error {
 	return s.rdb.Publish(s.ctx, channel, event).Err()

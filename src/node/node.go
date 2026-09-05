@@ -74,7 +74,6 @@ func (n *NodeService) Stop() error {
 	return nil
 }
 
-// to understand
 func (n *NodeService) flushLoop() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -168,7 +167,6 @@ func (n *NodeService) RemovePlayer(ctx context.Context, mapID, username string) 
 }
 
 func (n *NodeService) MovePlayer(ctx context.Context, mapID, username, dir string) (string, protocol.UserProfile, bool, error) {
-	//fmt.Println("[debug] node.go:move")
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -247,7 +245,6 @@ func manhattan(ax, ay, bx, by int) int {
 }
 
 func (n *NodeService) AttackBoss(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error) {
-	fmt.Println("[debug]进入node.go attackBoss")
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -257,18 +254,14 @@ func (n *NodeService) AttackBoss(ctx context.Context, mapID, username string) (s
 
 	profile, ok := instance.ProfileOf(username)
 	if !ok {
-		fmt.Println("[debug]node.go attackBoss:获取玩家profile失败")
 		return "", protocol.UserProfile{}, true, errors.New("获取玩家profile失败")
 	}
 	if !profile.Alive {
-		fmt.Println("[debug]node.go attackBoss:倒地时无法攻击")
-
 		return "倒地时无法攻击", profile, true, nil
 	}
 
 	state, hp, err := n.store.LoadGlobalBoss()
 	if err != nil || !state.Alive {
-		fmt.Println("[debug]node.go attackBoss:首领未复活")
 		return "首领还在复活倒计时", profile, true, nil
 	}
 
@@ -281,19 +274,16 @@ func (n *NodeService) AttackBoss(ctx context.Context, mapID, username string) (s
 		}
 	}
 	if bossSite == nil {
-		fmt.Println("[debug]node.go attackBoss:当前地图无首领")
 		return "当前地图没有首领的位面", profile, true, nil
 	}
 
 	if manhattan(bossSite.X, bossSite.Y, profile.X, profile.Y) > protocol.BossAtkRange {
-		fmt.Println("[debug]node.go attackBoss:首领范围外")
 		return fmt.Sprintf("首领在范围外,剩余HP:%d", hp), profile, true, nil
 	}
 
 	damage := profile.Attack
 	newHp, isKiller, _, err := n.store.AtomicAttackBoss(username, damage)
 	if err != nil {
-		fmt.Println("[debug]node.go attackBoss:攻击首领时err：", err)
 		return "", protocol.UserProfile{}, true, err
 	}
 
@@ -316,7 +306,6 @@ func (n *NodeService) AttackBoss(ctx context.Context, mapID, username string) (s
 		event += fmt.Sprintf("\nboss:%s,已经死亡！终结者：%s", state.Name, username)
 	}
 
-	fmt.Println("[debug]node.go attackBoss:成功")
 	return event, profile, true, nil
 }
 

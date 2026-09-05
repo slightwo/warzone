@@ -44,7 +44,6 @@ func (s *NodeGRPCServer) RemovePlayer(ctx context.Context, req *pb.RemovePlayerR
 }
 
 func (s *NodeGRPCServer) MovePlayer(ctx context.Context, req *pb.MovePlayerReq) (*pb.MovePlayerResp, error) {
-	//fmt.Println("[debug] grpc_server.go")
 	text, profile, ok, err := s.svc.MovePlayer(ctx, req.MapId, req.Username, req.Dir)
 	if err != nil {
 		return nil, err
@@ -95,7 +94,6 @@ func (s *NodeGRPCServer) BuyItem(ctx context.Context, req *pb.BuyItemReq) (*pb.B
 }
 
 func (s *NodeGRPCServer) AttackBoss(ctx context.Context, req *pb.AttackBossReq) (*pb.AttackBossResp, error) {
-	//fmt.Println("[debug] grpc_server.go")
 	text, profile, ok, err := s.svc.AttackBoss(ctx, req.MapId, req.Username)
 	if err != nil {
 		return nil, err

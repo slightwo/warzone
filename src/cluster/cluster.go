@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -74,7 +75,7 @@ type Cluster struct {
 	bossCache   protocol.BossState
 	bossHpCache int32
 
-	// to understand事件分离：纯内存通道，各个无状态网关实例自行订阅并缓冲
+	// 事件分离：纯内存通道，各网关实例自行订阅并缓冲
 	eventMu      sync.RWMutex
 	globalEvents []string
 	mapEvents    map[string][]string
@@ -86,8 +87,6 @@ type Cluster struct {
 	localSessions sync.Map
 }
 
-var studentTodoNotice sync.Map
-
 func NewCluster(store *storage.Store) (*Cluster, error) {
 	c := &Cluster{
 		store:      store,
@@ -97,8 +96,8 @@ func NewCluster(store *storage.Store) (*Cluster, error) {
 		configs:    make(map[string]world.MapConfig),
 		stopCh:     make(chan struct{}),
 		mapCache:   make(map[string]MapCacheData),
-		mapEvents:  make(map[string][]string), //to understand
-		userEvents: make(map[string][]string), //
+		mapEvents:  make(map[string][]string),
+		userEvents: make(map[string][]string),
 	}
 
 	for _, cfg := range world.AvailableMaps() {
@@ -154,9 +153,15 @@ func (c *Cluster) Close() {
 		if owner == nil || !owner.IsHealthy() {
 			continue
 		}
-		CP, _ := owner.Checkpoint(context.Background(), mapID)
+		CP, err := owner.Checkpoint(context.Background(), mapID)
+		if err != nil {
+			log.Printf("[checkpoint] 抓取地图 %s 快照失败: %v", mapID, err)
+			continue
+		}
 		CP.Players = []protocol.PlayerView{}
-		_ = c.store.SaveCheckpoint(CP)
+		if err := c.store.SaveCheckpoint(CP); err != nil {
+			log.Printf("[checkpoint] 保存地图 %s 快照失败: %v", mapID, err)
+		}
 		replicaID := replicas[mapID]
 		replica := c.nodes[replicaID]
 		if replica != nil && replica.IsHealthy() {
@@ -240,7 +245,6 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 	_ = c.store.SaveGlobalSession(session)
 	c.localSessions.Store(username, &session) // 更新本地缓存
 	c.mu.Unlock()
-	//to under
 	_ = c.store.PublishEvent("events:user:"+username, fmt.Sprintf("欢迎回来，%s", username))
 	_ = c.store.PublishEvent("events:user:"+username, fmt.Sprintf("当前地图 %s 由 %s 承载", mapID, ownerID))
 
@@ -361,13 +365,10 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	//fmt.Println("[debug] 任务下发至node")
 	event, _, ok, err := node.AttackBoss(context.Background(), session.MapID, username)
 	if err != nil || !ok {
-		//fmt.Println("[debug] 任务失败，c.attackboss,err:", err)
 		return nil, err
 	}
-	//fmt.Println("[debug] 任务正常结束，event:", event)
 	c.broadcastGlobalEvent(event)
 
 	if strings.Contains(event, "已经死亡！终结者：") {
@@ -379,10 +380,6 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 }
 
 func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, error) {
-	// TODO(Labc.mu.Unlock()3-2):
-	// 这里需要实现“跨地图切换 + 节点路由迁移”。
-	// 至少要处理：
-
 	session, src_node, err := c.sessionNode(username)
 	if err != nil {
 		return nil, err
@@ -456,11 +453,6 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 	_ = c.store.SaveProfile(profile)
 
 	return c.SnapshotFor(username)
-	// 1. 从源节点摘除玩家热状态。
-	// 2. 根据 owners 路由把玩家挂到目标地图主节点。
-	// 3. 更新 session.MapID / session.NodeID。
-	// 4. 将新的位置、地图、节点落盘到冷热数据。
-	//return nil, studentTODOError("Lab3-2", "cluster.SwitchMap", "完成跨地图路由与会话迁移")
 }
 
 func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
@@ -473,7 +465,6 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	ws := protocol.AllocWorldState()
 	ws.SessionVersion = sessionVersion
 
-	//to under
 	c.eventMu.RLock()
 	ws.Events = ws.Events[:0]
 	ws.Events = append(ws.Events, c.globalEvents...)
@@ -621,7 +612,6 @@ func (c *Cluster) pushEvent(username, event string) {
 	if event == "" {
 		return
 	}
-	// to under
 	_ = c.store.PublishEvent("events:user:"+username, event)
 }
 
@@ -703,7 +693,10 @@ func (c *Cluster) discoveryLoop() {
 					}
 
 					// 调用它的 Start
-					_ = client.Start()
+					if err := client.Start(); err != nil {
+						log.Printf("[节点发现] 启动节点客户端 %s 失败: %v", nInfo.ID, err)
+						return
+					}
 
 					// 获取短写锁，将验证好的新节点挂入路由拓扑 (不在此锁内发 RPC)
 					c.mu.Lock()
@@ -945,9 +938,15 @@ func (c *Cluster) checkpointLoop() {
 				if owner == nil || !owner.IsHealthy() {
 					continue
 				}
-				CP, _ := owner.Checkpoint(context.Background(), mapID)
+				CP, err := owner.Checkpoint(context.Background(), mapID)
+				if err != nil {
+					log.Printf("[checkpoint] 抓取地图 %s 快照失败: %v", mapID, err)
+					continue
+				}
 
-				_ = c.store.SaveCheckpoint(CP)
+				if err := c.store.SaveCheckpoint(CP); err != nil {
+					log.Printf("[checkpoint] 保存地图 %s 快照失败: %v", mapID, err)
+				}
 				replicaID := replicas[mapID]
 				replica := c.nodes[replicaID]
 				if replica != nil && replica.IsHealthy() {
@@ -991,7 +990,10 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 		if replicasNode == nil || !replicasNode.IsHealthy() {
 			continue
 		}
-		replicasNode.Promote(mapID, c.configs[mapID])
+		if err := replicasNode.Promote(mapID, c.configs[mapID]); err != nil {
+			log.Printf("[failover] 副本提升 %s 失败: %v", mapID, err)
+			continue
+		}
 		delete(c.replicas, mapID)
 		newReplicaID := c.pickReplicaLocked(replicasID)
 		c.replicas[mapID] = newReplicaID
@@ -1003,17 +1005,21 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 		c.replicas[mapID] = newReplicaID
 
 	}
-	sessions, _ := c.store.GetAllGlobalSessions()
-	for _, session := range sessions {
-		if session.NodeID == nodeID {
-			session.NodeID = c.owners[session.MapID]
-			c.store.SaveGlobalSession(session)
+	sessions, err := c.store.GetAllGlobalSessions()
+	if err != nil {
+		log.Printf("[failover] 获取全局会话列表失败: %v", err)
+	} else {
+		for _, session := range sessions {
+			if session.NodeID == nodeID {
+				session.NodeID = c.owners[session.MapID]
+				c.store.SaveGlobalSession(session)
 
-			// 节点失效时的补救：更新内存缓存
-			if val, ok := c.localSessions.Load(session.Username); ok {
-				cachedSession := val.(*storage.GlobalSession)
-				cachedSession.NodeID = session.NodeID
-				c.localSessions.Store(session.Username, cachedSession)
+				// 节点失效时的补救：更新内存缓存
+				if val, ok := c.localSessions.Load(session.Username); ok {
+					cachedSession := val.(*storage.GlobalSession)
+					cachedSession.NodeID = session.NodeID
+					c.localSessions.Store(session.Username, cachedSession)
+				}
 			}
 		}
 	}
@@ -1021,8 +1027,6 @@ func (c *Cluster) handleNodeFailure(nodeID string) {
 	delete(c.nodes, nodeID)
 	c.mu.Unlock()
 	c.broadcastGlobalEvent(fmt.Sprintf("%q 发生故障，已转移其他节点负责", nodeID))
-
-	//logStudentTODO("Lab3-5", "cluster.handleNodeFailure", "完成主节点故障后的副本提升与会话重路由")
 }
 
 func (c *Cluster) pickReplicaLocked(ownerID string) string {
@@ -1155,7 +1159,6 @@ func manhattan(ax, ay, bx, by int) int {
 }
 
 func (c *Cluster) eventLoop() {
-	//to under
 	ch := c.pubsub.Channel()
 	for {
 		select {
@@ -1165,13 +1168,11 @@ func (c *Cluster) eventLoop() {
 			}
 			c.eventMu.Lock()
 			if msg.Channel == "events:global" {
-				//fmt.Println("[debug]收到全局消息")
 				c.globalEvents = append(c.globalEvents, msg.Payload)
 				if len(c.globalEvents) > 3 {
 					c.globalEvents = c.globalEvents[len(c.globalEvents)-3:]
 				}
 			} else if strings.HasPrefix(msg.Channel, "events:map:") {
-				//fmt.Println("[debug]收到map消息")
 				mapID := strings.TrimPrefix(msg.Channel, "events:map:")
 				buf := append(c.mapEvents[mapID], msg.Payload)
 				if len(buf) > 3 {
