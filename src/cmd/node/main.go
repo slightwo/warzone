@@ -56,9 +56,20 @@ func main() {
 		}
 		for _, cfg := range available {
 			if cfg.ID == mapID {
-				ns.InstallPrimaryMap(cfg)
+				if store != nil {
+					if cp, ok := store.LoadCheckpoint(mapID); ok && cp.Version > 0 {
+						ns.RestorePrimaryMap(cfg, *cp)
+						log.Printf("节点 [%s] 从 checkpoint 恢复地图 %s (version %d)", nodeID, mapID, cp.Version)
+					} else {
+						ns.InstallPrimaryMap(cfg)
+						log.Printf("节点 [%s] 本地成功加载地图: %s", nodeID, mapID)
+					}
+				} else {
+					// store 初始化失败（PG 连不上）时仍继续，退化为起空图
+					ns.InstallPrimaryMap(cfg)
+					log.Printf("节点 [%s] 本地加载地图 %s（store 不可用，起空图）", nodeID, mapID)
+				}
 				hostedMaps = append(hostedMaps, mapID)
-				log.Printf("节点 [%s] 本地成功加载地图: %s", nodeID, mapID)
 				break
 			}
 		}
