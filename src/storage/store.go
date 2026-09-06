@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"os/user"
 	"strconv"
 	"time"
 
@@ -18,7 +20,7 @@ import (
 	"gorm.io/gorm"
 )
 
-var storeAddr = "172.31.50.252"
+var storeAddr = envOrDefault("BATTLEWORLD_STORE_ADDR", "127.0.0.1")
 
 type Store struct {
 	db  *gorm.DB
@@ -96,8 +98,16 @@ func fromDBUser(u UserRecord) protocol.UserProfile {
 
 func NewStore(baseDir string) (*Store, error) {
 	// 连接 PostgreSQL (冷数据)
-	// 根据实际环境修改 DSN
-	dsn := fmt.Sprintf("host=%s user=postgres password='Wu050601&&' dbname=battleworld port=5432 sslmode=disable TimeZone=Asia/Shanghai", storeAddr)
+	pgUser := envOrDefault("BATTLEWORLD_PGUSER", defaultPGUser())
+	pgPassword := os.Getenv("BATTLEWORLD_PGPASSWORD")
+	pgDBName := envOrDefault("BATTLEWORLD_PGDB", "battleworld")
+	pgPort := envOrDefault("BATTLEWORLD_PGPORT", "5432")
+
+	dsn := fmt.Sprintf("host=%s user=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Shanghai",
+		storeAddr, pgUser, pgDBName, pgPort)
+	if pgPassword != "" {
+		dsn += fmt.Sprintf(" password=%q", pgPassword)
+	}
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		fmt.Printf("警告: 无法连接PostgreSQL (%v)!\n可能需要确保 PostgreSQL 在 %s:5432 运行\n", err, storeAddr)
@@ -120,10 +130,19 @@ func NewStore(baseDir string) (*Store, error) {
 	}
 
 	// 连接 Redis (热数据)
+	redisPort := envOrDefault("BATTLEWORLD_REDIS_PORT", "6379")
+	redisPassword := os.Getenv("BATTLEWORLD_REDIS_PASSWORD")
+	redisDB := 0
+	if dbStr := os.Getenv("BATTLEWORLD_REDIS_DB"); dbStr != "" {
+		if parsed, err := strconv.Atoi(dbStr); err == nil {
+			redisDB = parsed
+		}
+	}
+
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:6379", storeAddr),
-		Password: "", // no password set
-		DB:       0,  // use default DB
+		Addr:     fmt.Sprintf("%s:%s", storeAddr, redisPort),
+		Password: redisPassword,
+		DB:       redisDB,
 	})
 
 	ctx := context.Background()
@@ -259,6 +278,23 @@ func (s *Store) LoadCheckpoint(mapID string) (*protocol.MapCheckpoint, bool) {
 func hashPassword(password string) string {
 	sum := sha256.Sum256([]byte(password))
 	return hex.EncodeToString(sum[:])
+}
+
+func envOrDefault(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func defaultPGUser() string {
+	if value := os.Getenv("PGUSER"); value != "" {
+		return value
+	}
+	if current, err := user.Current(); err == nil && current.Username != "" {
+		return current.Username
+	}
+	return "postgres"
 }
 
 type NodeRegistryInfo struct {
