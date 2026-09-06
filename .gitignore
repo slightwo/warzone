@@ -1,4 +1,19 @@
+# Local Go build and cache artifacts
 .gocache/
-src/cmd/benchmark/server.log
+bin/
+src/server
+src/cmd/benchmark/server_bin
 src/cmd/benchmark/server.bin
+src/cmd/benchmark/server.log
 *.exe
+
+# Local runtime logs
+*.log
+log/
+
+# Local helper scripts
+start.sh
+stop.sh
+
+# macOS Finder metadata
+.DS_Store
