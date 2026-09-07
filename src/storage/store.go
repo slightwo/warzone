@@ -21,6 +21,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var ErrGlobalBossNotInitialized = errors.New("boss state not initialized")
+
 type Store struct {
 	db  *gorm.DB
 	rdb *redis.Client
@@ -481,7 +483,7 @@ func (s *Store) LoadGlobalBoss() (protocol.BossState, int32, error) {
 	hpStr, err := s.rdb.Get(ctx, "boss:global:hp").Result()
 	if err != nil {
 		if err == redis.Nil {
-			return protocol.BossState{}, 0, errors.New("boss state not initialized")
+			return protocol.BossState{}, 0, ErrGlobalBossNotInitialized
 		}
 		return protocol.BossState{}, 0, err
 	}

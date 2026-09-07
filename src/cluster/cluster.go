@@ -31,11 +31,16 @@ type MapCacheData struct {
 }
 
 type Cluster struct {
-	mu              sync.RWMutex
-	store           *storage.Store
-	nodes           map[string]managedNodeClient
-	connectingNodes map[string]struct{}
-	// owners 与 replicas 是兼容既有路由逻辑的过渡缓存，只能由 applyTopologyLocked 写入。
+	mu          sync.RWMutex
+	store       *storage.Store
+	nodes       map[string]gatewayNodeClient
+	nodeAddrs   map[string]string
+	nodeTargets map[string]string
+	nodeFactory gatewayNodeClientFactory
+	activeNodes func() ([]storage.NodeRegistryInfo, error)
+	closeOnce   sync.Once
+	closed      bool
+	// owners 与 replicas 是已提交拓扑的网关只读缓存，只能由 applyTopologyLocked 写入。
 	owners         map[string]string
 	replicas       map[string]string
 	topology       storage.Topology
@@ -63,36 +68,39 @@ type Cluster struct {
 }
 
 func NewCluster(store *storage.Store) (*Cluster, error) {
+	return newCluster(store, func(nodeID, addr string) (gatewayNodeClient, error) {
+		return NewNodeGRPCClient(nodeID, addr)
+	})
+}
+
+func newCluster(store *storage.Store, nodeFactory gatewayNodeClientFactory) (*Cluster, error) {
+	if store == nil {
+		return nil, errors.New("gateway store 不能为空")
+	}
+	if nodeFactory == nil {
+		return nil, errors.New("gateway node client factory 不能为空")
+	}
 	c := &Cluster{
-		store:           store,
-		nodes:           make(map[string]managedNodeClient),
-		connectingNodes: make(map[string]struct{}),
-		owners:          make(map[string]string),
-		replicas:        make(map[string]string),
-		configs:         make(map[string]world.MapConfig),
-		stopCh:          make(chan struct{}),
-		mapCache:        make(map[string]MapCacheData),
-		mapEvents:       make(map[string][]string),
-		userEvents:      make(map[string][]string),
+		store:       store,
+		nodes:       make(map[string]gatewayNodeClient),
+		nodeAddrs:   make(map[string]string),
+		nodeTargets: make(map[string]string),
+		nodeFactory: nodeFactory,
+		activeNodes: store.GetActiveNodes,
+		owners:      make(map[string]string),
+		replicas:    make(map[string]string),
+		configs:     make(map[string]world.MapConfig),
+		stopCh:      make(chan struct{}),
+		mapCache:    make(map[string]MapCacheData),
+		mapEvents:   make(map[string][]string),
+		userEvents:  make(map[string][]string),
 	}
 
 	for _, cfg := range world.AvailableMaps() {
 		c.configs[cfg.ID] = cfg
 	}
 
-	// 从Redis加载Boss状态，如果没找到则初始化
-	if _, _, err := store.LoadGlobalBoss(); err != nil {
-		initialState := protocol.BossState{
-			Name:      "王子文",
-			Alive:     true,
-			Sites:     c.buildBossSites(),
-			Version:   1,
-			AttackGap: 2000,
-		}
-		store.InitGlobalBoss(1600, initialState)
-	}
-
-	// 路由拓扑由 Redis 中已提交的 Topology 决定；discovery 只维护节点连接池。
+	// Boss 初始化与复活均由 coordinator 处理；网关仅在缓存循环中读取当前状态。
 	c.pubsub = store.SubscribeEvents()
 	go c.eventLoop()
 	return c, nil
@@ -106,18 +114,25 @@ func (c *Cluster) Start() error {
 	}
 	go c.topologySyncLoop()
 	go c.mapCacheLoop()
-	go c.discoveryLoop()
-	go c.heartbeatLoop()
 	return nil
 }
 func (c *Cluster) Close() {
-	// 节点自治后，协调器关闭时无需再抓 checkpoint 落盘（节点自落盘、副本自拉）。
-	// 仅通知各后台循环退出。
-	select {
-	case <-c.stopCh:
-	default:
+	c.closeOnce.Do(func() {
 		close(c.stopCh)
-	}
+		c.mu.Lock()
+		c.closed = true
+		nodes := make([]gatewayNodeClient, 0, len(c.nodes))
+		for _, node := range c.nodes {
+			nodes = append(nodes, node)
+		}
+		c.nodes = make(map[string]gatewayNodeClient)
+		c.nodeAddrs = make(map[string]string)
+		c.nodeTargets = make(map[string]string)
+		c.mu.Unlock()
+		for _, node := range nodes {
+			_ = node.Close()
+		}
+	})
 }
 func (c *Cluster) Register(username, password, confirm string) error {
 	if confirm == "" {
@@ -129,20 +144,12 @@ func (c *Cluster) Register(username, password, confirm string) error {
 	return c.store.Register(username, password)
 }
 
-func (c *Cluster) ExecuteAdmin(action, nodeID string) (string, error) {
+func (c *Cluster) ExecuteAdmin(action, _ string) (string, error) {
 	switch action {
 	case "status", "状态":
 		return c.adminStatus(), nil
-	case "fail", "down", "故障":
-		if nodeID == "" {
-			return "", errors.New("请指定需要模拟故障的节点")
-		}
-		return c.failNode(nodeID)
-	case "recover", "up", "恢复":
-		if nodeID == "" {
-			return "", errors.New("请指定需要恢复的节点")
-		}
-		return c.recoverNode(nodeID)
+	case "fail", "down", "故障", "recover", "up", "恢复":
+		return "", errors.New("节点故障与恢复管理已迁入 coordinator；gateway 仅提供只读状态")
 	default:
 		return "", fmt.Errorf("未知管理动作：%s", action)
 	}
@@ -174,10 +181,11 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 	}
 	ownerID := c.owners[mapID]
 	owner := c.nodes[ownerID]
+	topologyLoaded := c.topologyLoaded
 	c.mu.Unlock()
 
-	if owner == nil || !owner.IsHealthy() {
-		return nil, errors.New("目标地图当前没有可用节点")
+	if !topologyLoaded || ownerID == "" || owner == nil {
+		return nil, errors.New("路由尚未就绪，请等待 coordinator 提交拓扑")
 	}
 
 	if err := owner.AddPlayer(context.Background(), mapID, profile); err != nil {
@@ -214,7 +222,7 @@ func (c *Cluster) Logout(username string) error {
 	c.mu.RLock()
 	node := c.nodes[session.NodeID]
 	c.mu.RUnlock()
-	if node == nil || !node.IsHealthy() {
+	if node == nil {
 		return c.store.DeleteHotSession(username)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -324,11 +332,6 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 	}
 	c.broadcastGlobalEvent(event)
 
-	if strings.Contains(event, "已经死亡！终结者：") {
-		bState, _, _ := c.store.LoadGlobalBoss()
-		go c.respawnBossAfterCooldown(bState.Name)
-	}
-
 	return c.SnapshotFor(username)
 }
 
@@ -353,9 +356,10 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 	}
 	dstNodeID := c.owners[targetMap]
 	dst := c.nodes[dstNodeID]
+	topologyLoaded := c.topologyLoaded
 	c.mu.RUnlock()
-	if dst == nil || !dst.IsHealthy() {
-		return nil, fmt.Errorf("目标地图 %q 当前没有可用节点", targetMap)
+	if !topologyLoaded || dstNodeID == "" || dst == nil {
+		return nil, fmt.Errorf("目标地图 %q 路由尚未就绪，请等待 coordinator 提交拓扑", targetMap)
 	}
 
 	profile, ok, err = src_node.RemovePlayer(context.Background(), session.MapID, username)
@@ -439,11 +443,8 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	}
 
 	c.mu.RLock()
-	nodes := make(map[string]managedNodeClient, len(c.nodes))
-	for k, v := range c.nodes {
-		nodes[k] = v
-	}
 	configs := c.configs
+	nodeViews := c.gatewayNodeViewsLocked()
 	c.mu.RUnlock()
 
 	c.bossCacheMu.RLock()
@@ -512,15 +513,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 		}
 	}
 
-	nodeIDs := make([]string, 0, len(nodes))
-	for nodeID := range nodes {
-		nodeIDs = append(nodeIDs, nodeID)
-	}
-	sort.Strings(nodeIDs)
-	ws.Nodes = ws.Nodes[:0]
-	for _, nodeID := range nodeIDs {
-		ws.Nodes = append(ws.Nodes, nodes[nodeID].View())
-	}
+	ws.Nodes = append(ws.Nodes[:0], nodeViews...)
 
 	ws.Self = self
 	ws.Map = mapView
@@ -537,8 +530,7 @@ func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, GatewayN
 		c.mu.RLock()
 		node := c.nodes[session.NodeID]
 		c.mu.RUnlock()
-
-		if node == nil || !node.IsHealthy() {
+		if node == nil {
 			return nil, nil, fmt.Errorf("节点 %q 当前不可用", session.NodeID)
 		}
 
@@ -559,7 +551,7 @@ func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, GatewayN
 	c.localSessions.Store(username, session)
 
 	node := c.nodes[session.NodeID]
-	if node == nil || !node.IsHealthy() {
+	if node == nil {
 		return nil, nil, fmt.Errorf("节点 %q 当前不可用", session.NodeID)
 	}
 	copySession := *session
@@ -594,121 +586,6 @@ func (c *Cluster) broadcastMapEvent(mapID, event string) {
 	_ = c.store.PublishEvent("events:map:"+mapID, event)
 }
 
-func (c *Cluster) respawnBossAfterCooldown(name string) {
-	time.Sleep(15 * time.Second)
-
-	bState, hp, err := c.store.LoadGlobalBoss()
-	if err == nil && !bState.Alive {
-		if c.store.TryLockBossRespawn() {
-			bState.Alive = true
-			bState.LastHit = ""
-			if hp <= 0 {
-				hp = 1600
-			}
-			c.store.InitGlobalBoss(hp, bState)
-			c.broadcastGlobalEvent(fmt.Sprintf("世界首领【%s】重新降临，所有服务器均可参与讨伐", name))
-		}
-	}
-}
-
-func (c *Cluster) discoveryLoop() {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			activeNodes, err := c.store.GetActiveNodes()
-			if err != nil {
-				log.Printf("[discovery] 读取活跃节点失败: %v", err)
-				continue
-			}
-			c.discoverNodes(activeNodes)
-
-			// 只有 Redis 中尚不存在拓扑时，才允许依据候选能力执行一次 bootstrap。
-			// 已提交拓扑后，后续注册/重连只能影响连接池，不得覆写路由主权。
-			if err := c.bootstrapTopologyIfAbsent(c.connectedNodeRegistrations(activeNodes)); err != nil {
-				log.Printf("[topology] bootstrap 失败: %v", err)
-			}
-		case <-c.stopCh:
-			return
-		}
-	}
-}
-
-// discoverNodes 仅建立并维护可用节点连接，不根据节点注册声明修改路由拓扑。
-func (c *Cluster) discoverNodes(activeNodes []storage.NodeRegistryInfo) {
-	c.mu.Lock()
-	pending := make([]storage.NodeRegistryInfo, 0, len(activeNodes))
-	for _, info := range activeNodes {
-		if _, connected := c.nodes[info.ID]; connected {
-			continue
-		}
-		if _, connecting := c.connectingNodes[info.ID]; connecting {
-			continue
-		}
-		c.connectingNodes[info.ID] = struct{}{}
-		pending = append(pending, info)
-	}
-	c.mu.Unlock()
-
-	for _, info := range pending {
-		go c.connectDiscoveredNode(info)
-	}
-}
-
-func (c *Cluster) connectDiscoveredNode(info storage.NodeRegistryInfo) {
-	client, err := NewNodeGRPCClient(info.ID, info.Addr)
-	if err != nil {
-		c.finishNodeConnection(info.ID)
-		log.Printf("[discovery] 创建节点 %s 客户端失败: %v", info.ID, err)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	err = client.Ping(ctx)
-	cancel()
-	if err != nil {
-		_ = client.Close()
-		c.finishNodeConnection(info.ID)
-		log.Printf("[discovery] 节点 %s 健康检查失败: %v", info.ID, err)
-		return
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.connectingNodes, info.ID)
-	if _, exists := c.nodes[info.ID]; exists {
-		_ = client.Close()
-		return
-	}
-	c.nodes[info.ID] = client
-	log.Printf("[discovery] 节点 %s 已加入连接池", info.ID)
-}
-
-func (c *Cluster) finishNodeConnection(nodeID string) {
-	c.mu.Lock()
-	delete(c.connectingNodes, nodeID)
-	c.mu.Unlock()
-}
-
-// connectedNodeRegistrations 仅保留已完成连接且健康的节点注册信息，避免将 Redis 中
-// 尚未验证可达性的临时/过期租约用于 bootstrap。
-func (c *Cluster) connectedNodeRegistrations(activeNodes []storage.NodeRegistryInfo) []storage.NodeRegistryInfo {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	connected := make([]storage.NodeRegistryInfo, 0, len(activeNodes))
-	for _, info := range activeNodes {
-		node, ok := c.nodes[info.ID]
-		if !ok || !node.IsHealthy() {
-			continue
-		}
-		connected = append(connected, info)
-	}
-	return connected
-}
-
 func (c *Cluster) mapCacheLoop() {
 	ticker := time.NewTicker(150 * time.Millisecond)
 	defer ticker.Stop()
@@ -721,7 +598,7 @@ func (c *Cluster) mapCacheLoop() {
 			for k, v := range c.owners {
 				owners[k] = v
 			}
-			nodes := make(map[string]managedNodeClient)
+			nodes := make(map[string]gatewayNodeClient)
 			for k, v := range c.nodes {
 				nodes[k] = v
 			}
@@ -746,7 +623,7 @@ func (c *Cluster) mapCacheLoop() {
 
 			for mapID, ownerID := range owners {
 				host := nodes[ownerID]
-				if host == nil || !host.IsHealthy() {
+				if host == nil {
 					continue
 				}
 				cfg := configs[mapID]
@@ -797,165 +674,6 @@ func (c *Cluster) mapCacheLoop() {
 			return
 		}
 	}
-}
-
-func (c *Cluster) heartbeatLoop() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			nodeIDs := make([]string, 0, len(c.nodes))
-			c.mu.RLock()
-			for nodeID := range c.nodes {
-				nodeIDs = append(nodeIDs, nodeID)
-			}
-			sort.Strings(nodeIDs)
-			nodes := make([]managedNodeClient, 0, len(nodeIDs))
-			for _, nodeID := range nodeIDs {
-				nodes = append(nodes, c.nodes[nodeID])
-			}
-			c.mu.RUnlock()
-
-			var wg sync.WaitGroup
-			for _, node := range nodes {
-				wg.Add(1)
-				go func(n managedNodeClient) {
-					defer wg.Done()
-					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-					defer cancel()
-
-					// 使用原生的 gRPC Ping 测试应用层健康程度，而不是简单测试 TCP 端口
-					err := n.Ping(ctx)
-					healthy := err == nil
-
-					wasHealthy := n.SetHealthy(healthy)
-					if wasHealthy && !healthy {
-						c.handleNodeFailure(n.NodeID())
-					}
-				}(node)
-			}
-			wg.Wait()
-		case <-c.stopCh:
-			return
-		}
-	}
-}
-
-// handleNodeFailure 在 2.2-A 只标记节点不可用，不得在内存中提升副本或改写拓扑。
-// 故障节点的客户端连接暂留在连接池中，以支持 recoverNode 的原地恢复；连接池回收会在
-// 2.2-C 的带 epoch 故障转移中与拓扑切换一并实现。完整的 Promote、MapEpoch fencing、
-// Topology CAS 与会话迁移也将在该阶段作为一个原子流程实现。
-func (c *Cluster) handleNodeFailure(nodeID string) {
-	c.mu.RLock()
-	affectedMaps := make([]string, 0)
-	if c.topologyLoaded {
-		for mapID, ownerID := range c.topology.Owners {
-			if ownerID == nodeID {
-				affectedMaps = append(affectedMaps, mapID)
-			}
-		}
-	}
-	c.mu.RUnlock()
-	sort.Strings(affectedMaps)
-
-	if len(affectedMaps) == 0 {
-		log.Printf("[failover] 节点 %s 不再承载任何已提交地图，拓扑保持版本不变", nodeID)
-	} else {
-		log.Printf("[failover] 节点 %s 不可用，受影响地图=%v；等待 2.2-C 的带 epoch 故障转移", nodeID, affectedMaps)
-	}
-	c.broadcastGlobalEvent(fmt.Sprintf("%q 发生故障，当前拓扑保持不变，受影响地图暂不可用", nodeID))
-}
-
-func (c *Cluster) adminStatus() string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	nodeIDs := make([]string, 0, len(c.nodes))
-	for nodeID := range c.nodes {
-		nodeIDs = append(nodeIDs, nodeID)
-	}
-	sort.Strings(nodeIDs)
-
-	lines := []string{"集群状态总览："}
-	for _, nodeID := range nodeIDs {
-		view := c.nodes[nodeID].View()
-		status := "离线"
-		if view.Healthy {
-			status = "在线"
-		}
-		lines = append(lines, fmt.Sprintf("- %s %s 主分片=%v 副本=%v", view.ID, status, view.PrimaryMaps, view.ReplicaMaps))
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (c *Cluster) failNode(nodeID string) (string, error) {
-	c.mu.RLock()
-	node, ok := c.nodes[nodeID]
-	c.mu.RUnlock()
-	if !ok {
-		return "", fmt.Errorf("节点 %s 不存在", nodeID)
-	}
-	view := node.View()
-	for _, mapID := range view.PrimaryMaps {
-		cp, err := node.Checkpoint(context.Background(), mapID)
-		if err != nil {
-			continue
-		}
-		// 故障转移前确保 Redis 有最新快照；副本由各自 replicaSyncLoop 自拉。
-		_ = c.store.SaveCheckpoint(cp)
-	}
-	// 节点进程由部署系统管理；管理命令仅模拟网关侧连接不可用。
-	node.SetHealthy(false)
-	c.handleNodeFailure(nodeID)
-	c.broadcastGlobalEvent(fmt.Sprintf("管理命令：已模拟 %s 故障，拓扑保持不变", nodeID))
-	return fmt.Sprintf("节点 %s 已被标记为故障；受影响地图将暂不可用，等待带 epoch 的故障转移", nodeID), nil
-}
-
-func (c *Cluster) recoverNode(nodeID string) (string, error) {
-	c.mu.RLock()
-	node, ok := c.nodes[nodeID]
-	c.mu.RUnlock()
-	if !ok {
-		return "", fmt.Errorf("节点 %s 不存在", nodeID)
-	}
-	// 与 failNode 对称：管理命令仅恢复网关侧健康标记，节点进程生命周期由部署系统管理。
-	node.SetHealthy(true)
-
-	c.broadcastGlobalEvent(fmt.Sprintf("管理命令：节点 %s 已恢复在线，拓扑保持不变", nodeID))
-	return fmt.Sprintf("节点 %s 已恢复；其注册声明不会修改已提交拓扑", nodeID), nil
-}
-
-func (c *Cluster) buildBossSites() []protocol.BossSite {
-	mapIDs := make([]string, 0, len(c.configs))
-	for mapID := range c.configs {
-		mapIDs = append(mapIDs, mapID)
-	} //获取所有地图名，并排序
-	sort.Strings(mapIDs)
-
-	sites := make([]protocol.BossSite, 0, len(mapIDs))
-	for _, mapID := range mapIDs {
-		cfg := c.configs[mapID]
-		sites = append(sites, protocol.BossSite{
-			MapID: mapID,
-			X:     cfg.BossX,
-			Y:     cfg.BossY,
-		})
-	}
-	return sites
-}
-
-func manhattan(ax, ay, bx, by int) int {
-	dx := ax - bx
-	if dx < 0 {
-		dx = -dx
-	}
-	dy := ay - by
-	if dy < 0 {
-		dy = -dy
-	}
-	return dx + dy
 }
 
 func (c *Cluster) eventLoop() {

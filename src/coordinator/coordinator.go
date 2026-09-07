@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"battleworld/cluster"
+	"battleworld/protocol"
 	"battleworld/storage"
 	"battleworld/world"
 )
@@ -24,6 +25,10 @@ type ControlStore interface {
 	LoadTopology() (*storage.Topology, bool, error)
 	CompareAndSaveTopology(uint64, storage.Topology) error
 	PublishTopologyChanged(uint64) error
+	LoadGlobalBoss() (protocol.BossState, int32, error)
+	InitGlobalBoss(int32, protocol.BossState) error
+	TryLockBossRespawn() bool
+	PublishEvent(string, string) error
 }
 
 // NodeClientFactory 为一个已发现节点创建控制面客户端。
@@ -44,7 +49,8 @@ type Coordinator struct {
 	newNodeClient   NodeClientFactory
 	stopCh          chan struct{}
 	closeOnce       sync.Once
-	startOnce       sync.Once
+	startMu         sync.Mutex
+	started         bool
 	closed          bool
 
 	discoveryInterval time.Duration
@@ -84,16 +90,36 @@ func newCoordinator(store ControlStore, newNodeClient NodeClientFactory, configs
 
 // Start 启动发现和健康检查循环；重复调用是安全的。
 func (c *Coordinator) Start() error {
+	c.startMu.Lock()
+	defer c.startMu.Unlock()
+
 	c.mu.RLock()
-	closed := c.closed
+	closed, started := c.closed, c.started
 	c.mu.RUnlock()
 	if closed {
 		return errors.New("coordinator 已关闭")
 	}
-	c.startOnce.Do(func() {
-		go c.discoveryLoop()
-		go c.heartbeatLoop()
-	})
+	if started {
+		return nil
+	}
+	if err := c.ensureBoss(); err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return errors.New("coordinator 已关闭")
+	}
+	if c.started {
+		c.mu.Unlock()
+		return nil
+	}
+	c.started = true
+	c.mu.Unlock()
+	go c.discoveryLoop()
+	go c.heartbeatLoop()
+	go c.bossLoop()
 	return nil
 }
 

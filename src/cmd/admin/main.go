@@ -61,8 +61,5 @@ func usage() {
 	fmt.Println("用法：")
 	fmt.Println("  go run ./cmd/admin 状态")
 	fmt.Println("  go run ./cmd/admin 状态 127.0.0.1:9310")
-	fmt.Println("  go run ./cmd/admin 故障 node-a")
-	fmt.Println("  go run ./cmd/admin 故障 node-a 127.0.0.1:9310")
-	fmt.Println("  go run ./cmd/admin 恢复 node-a")
-	fmt.Println("  go run ./cmd/admin 恢复 node-a 127.0.0.1:9310")
+	fmt.Println("  节点故障与恢复管理由 coordinator 负责，当前 gateway 管理接口仅提供状态查询")
 }

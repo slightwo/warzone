@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"battleworld/cluster"
 	"battleworld/protocol"
@@ -13,14 +14,19 @@ import (
 )
 
 type fakeControlStore struct {
-	mu             sync.Mutex
-	activeNodes    []storage.NodeRegistryInfo
-	topology       *storage.Topology
-	loadErr        error
-	casErr         error
-	casCalls       int
-	published      []uint64
-	publishErr     error
+	mu          sync.Mutex
+	activeNodes []storage.NodeRegistryInfo
+	topology    *storage.Topology
+	loadErr     error
+	casErr      error
+	casCalls    int
+	published   []uint64
+	publishErr  error
+	events      []string
+	bossState   *protocol.BossState
+	bossHP      int32
+	bossLoadErr error
+	respawnLock bool
 }
 
 func (s *fakeControlStore) GetActiveNodes() ([]storage.NodeRegistryInfo, error) {
@@ -67,11 +73,52 @@ func (s *fakeControlStore) PublishTopologyChanged(version uint64) error {
 	return nil
 }
 
+func (s *fakeControlStore) LoadGlobalBoss() (protocol.BossState, int32, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.bossLoadErr != nil {
+		return protocol.BossState{}, 0, s.bossLoadErr
+	}
+	if s.bossState == nil {
+		return protocol.BossState{}, 0, storage.ErrGlobalBossNotInitialized
+	}
+	return *s.bossState, s.bossHP, nil
+}
+
+func (s *fakeControlStore) InitGlobalBoss(hp int32, state protocol.BossState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clone := state
+	s.bossState = &clone
+	s.bossHP = hp
+	return nil
+}
+
+func (s *fakeControlStore) TryLockBossRespawn() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.respawnLock {
+		return false
+	}
+	s.respawnLock = true
+	return true
+}
+
+func (s *fakeControlStore) PublishEvent(channel, event string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.publishErr != nil {
+		return s.publishErr
+	}
+	s.events = append(s.events, channel+":"+event)
+	return nil
+}
+
 type fakeCoordinatorNodeClient struct {
-	mu       sync.Mutex
-	id       string
-	pingErr  error
-	closed   bool
+	mu      sync.Mutex
+	id      string
+	pingErr error
+	closed  bool
 }
 
 func (c *fakeCoordinatorNodeClient) NodeID() string { return c.id }
@@ -188,6 +235,44 @@ func TestConnectedNodeRegistrationsAndHeartbeat(t *testing.T) {
 	coordinator.mu.RUnlock()
 	if !healthy {
 		t.Fatal("心跳恢复后 node-a 未恢复健康标记")
+	}
+}
+
+func TestCoordinatorInitializesAndRestoresBoss(t *testing.T) {
+	store := &fakeControlStore{}
+	coordinator := newTestCoordinator(t, store)
+
+	if err := coordinator.ensureBoss(); err != nil {
+		t.Fatalf("初始化 Boss: %v", err)
+	}
+	store.mu.Lock()
+	if store.bossState == nil || !store.bossState.Alive || store.bossHP != defaultBossHP {
+		store.mu.Unlock()
+		t.Fatalf("初始 Boss 状态错误: state=%+v hp=%d", store.bossState, store.bossHP)
+	}
+	if len(store.bossState.Sites) != 1 || store.bossState.Sites[0].MapID != "green" {
+		store.mu.Unlock()
+		t.Fatalf("初始 Boss 站点错误: %+v", store.bossState.Sites)
+	}
+	dead := *store.bossState
+	dead.Alive = false
+	dead.LastHit = "player-a"
+	dead.RespawnAt = time.Now().Add(-time.Second)
+	store.bossState = &dead
+	store.bossHP = 0
+	store.mu.Unlock()
+
+	coordinator.restoreBossIfDue()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if !store.bossState.Alive || store.bossState.LastHit != "" || !store.bossState.RespawnAt.IsZero() {
+		t.Fatalf("Boss 未正确复活: %+v", store.bossState)
+	}
+	if store.bossHP != defaultBossHP || store.bossState.Version != dead.Version+1 {
+		t.Fatalf("Boss 复活版本或血量错误: version=%d hp=%d", store.bossState.Version, store.bossHP)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("Boss 复活未发布全局事件: %v", store.events)
 	}
 }
 

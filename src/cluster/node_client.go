@@ -35,11 +35,12 @@ type CoordinatorNodeClient interface {
 	Close() error
 }
 
-// managedNodeClient 是 2.2-B 拆分期间 Cluster 的内部过渡接口。B.2 将 discovery、
-// heartbeat 和故障处理迁入 coordinator 后，网关只会保留 GatewayNodeClient 引用。
-type managedNodeClient interface {
+// gatewayNodeClient 是网关管理数据面传输连接时使用的内部接口。Close 仅用于在
+// Topology owner 集合变化时释放本地传输资源，不赋予网关任何控制面能力。
+type gatewayNodeClient interface {
 	GatewayNodeClient
-	CoordinatorNodeClient
-	IsHealthy() bool
-	SetHealthy(bool) bool
+	Close() error
 }
+
+// gatewayNodeClientFactory 按节点注册中的地址创建网关数据面连接。
+type gatewayNodeClientFactory func(nodeID, addr string) (gatewayNodeClient, error)

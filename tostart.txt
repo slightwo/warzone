@@ -1,4 +1,6 @@
 go run ./cmd/node -id "node-a" -maps "green" -replicas "cave" -addr "127.0.0.1:9311"
 go run ./cmd/node -id "node-b" -maps "cave,ruins" -addr "127.0.0.1:9312"
 go run ./cmd/node -id "node-c" -replicas "green,ruins" -addr "127.0.0.1:9313"
+go run ./cmd/coordinator
+go run ./cmd/server
 go run ./cmd/benchmark/main.go -u 800 -t 60

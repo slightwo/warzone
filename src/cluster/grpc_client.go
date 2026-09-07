@@ -2,7 +2,6 @@ package cluster
 
 import (
 	"context"
-	"sync"
 
 	"battleworld/pb"
 	"battleworld/protocol"
@@ -14,11 +13,9 @@ import (
 
 // NodeGRPCClient 是节点的 gRPC 传输实现，同时满足网关数据面与协调器控制面接口。
 type NodeGRPCClient struct {
-	client  pb.NodeServiceClient
-	conn    *grpc.ClientConn
-	id      string
-	mu      sync.RWMutex
-	healthy bool
+	client pb.NodeServiceClient
+	conn   *grpc.ClientConn
+	id     string
 }
 
 func NewNodeGRPCClient(id string, addr string) (*NodeGRPCClient, error) {
@@ -28,10 +25,9 @@ func NewNodeGRPCClient(id string, addr string) (*NodeGRPCClient, error) {
 		return nil, err
 	}
 	return &NodeGRPCClient{
-		client:  pb.NewNodeServiceClient(conn),
-		conn:    conn,
-		id:      id,
-		healthy: true,
+		client: pb.NewNodeServiceClient(conn),
+		conn:   conn,
+		id:     id,
 	}, nil
 }
 
@@ -203,27 +199,13 @@ func (c *NodeGRPCClient) View() protocol.NodeView {
 	req := &pb.ViewReq{}
 	resp, err := c.client.View(context.Background(), req)
 	if err != nil || resp.View == nil {
-		return protocol.NodeView{ID: c.id, Healthy: c.IsHealthy()} // fallback
+		return protocol.NodeView{ID: c.id}
 	}
 	return protocol.FromProtoNodeView(resp.View)
-}
-
-func (c *NodeGRPCClient) IsHealthy() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.healthy
-}
-
-func (c *NodeGRPCClient) SetHealthy(healthy bool) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	old := c.healthy
-	c.healthy = healthy
-	return old
 }
 
 var (
 	_ GatewayNodeClient     = (*NodeGRPCClient)(nil)
 	_ CoordinatorNodeClient = (*NodeGRPCClient)(nil)
-	_ managedNodeClient     = (*NodeGRPCClient)(nil)
+	_ gatewayNodeClient     = (*NodeGRPCClient)(nil)
 )
