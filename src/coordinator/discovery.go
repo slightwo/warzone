@@ -8,7 +8,7 @@ import (
 	"battleworld/storage"
 )
 
-func (c *Coordinator) discoveryLoop() {
+func (c *Coordinator) discoveryLoop(leaderCtx context.Context) {
 	ticker := time.NewTicker(c.discoveryInterval)
 	defer ticker.Stop()
 
@@ -16,13 +16,16 @@ func (c *Coordinator) discoveryLoop() {
 		select {
 		case <-ticker.C:
 			c.discoverOnce()
-		case <-c.stopCh:
+		case <-leaderCtx.Done():
 			return
 		}
 	}
 }
 
 func (c *Coordinator) discoverOnce() {
+	if _, leader := c.currentLeaderTerm(); !leader {
+		return
+	}
 	activeNodes, err := c.store.GetActiveNodes()
 	if err != nil {
 		log.Printf("[coordinator/discovery] 读取活跃节点失败: %v", err)

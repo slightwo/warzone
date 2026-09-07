@@ -61,3 +61,9 @@ func RedisDB() int {
 	}
 	return db
 }
+
+// CoordinatorID 返回部署可配置的协调器身份。为空时由 coordinator 使用主机和进程号生成
+// 本实例标识；Redis lease token 仍会额外包含不可复用的随机部分。
+func CoordinatorID() string {
+	return EnvOrAny("", "BATTLEWORLD_COORDINATOR_ID", "BW_COORDINATOR_ID")
+}

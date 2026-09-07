@@ -210,6 +210,43 @@ func TestTopologyStoreConcurrentCreateOnlyOneSucceeds(t *testing.T) {
 	}
 }
 
+func TestLeaderTermFencesStaleCoordinatorTopologyCommit(t *testing.T) {
+	store := newTopologyTestStore(t)
+	if err := store.rdb.Set(store.ctx, CoordinatorLeaderTermRedisKey, 3, 0).Err(); err != nil {
+		t.Fatalf("seed leader term: %v", err)
+	}
+	initial := validTopology()
+	initial.LeaderTerm = 3
+	if err := store.CompareAndSaveTopologyForLeader(0, initial, 3); err != nil {
+		t.Fatalf("commit term 3 topology: %v", err)
+	}
+
+	if err := store.rdb.Set(store.ctx, CoordinatorLeaderTermRedisKey, 4, 0).Err(); err != nil {
+		t.Fatalf("advance durable leader term: %v", err)
+	}
+	stale := initial.Clone()
+	stale.Version = 2
+	stale.LeaderTerm = 3
+	stale.Replicas["green"] = "node-c"
+	stale.UpdatedAt = time.Now().UTC()
+	if err := store.CompareAndSaveTopologyForLeader(1, stale, 3); !errors.Is(err, ErrLeaderTermInvariant) {
+		t.Fatalf("stale leader commit error = %v, want ErrLeaderTermInvariant", err)
+	}
+	loaded, found, err := store.LoadTopology()
+	if err != nil || !found || loaded.Version != 1 || loaded.LeaderTerm != 3 || loaded.Replicas["green"] != "node-b" {
+		t.Fatalf("stale leader modified topology: topology=%+v found=%t err=%v", loaded, found, err)
+	}
+
+	current := initial.Clone()
+	current.Version = 2
+	current.LeaderTerm = 4
+	current.Replicas["green"] = "node-c"
+	current.UpdatedAt = time.Now().UTC()
+	if err := store.CompareAndSaveTopologyForLeader(1, current, 4); err != nil {
+		t.Fatalf("current leader commit: %v", err)
+	}
+}
+
 func TestLoadTopologyRejectsCorruptData(t *testing.T) {
 	store := newTopologyTestStore(t)
 	if err := store.rdb.Set(store.ctx, TopologyRedisKey, "not-json", 0).Err(); err != nil {

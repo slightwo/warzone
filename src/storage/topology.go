@@ -15,6 +15,8 @@ const (
 	TopologyEventChannel = "events:topology"
 	// MapFenceRedisKeyPrefix 保存地图当前 owner 和 epoch 的原子写入 fence。
 	MapFenceRedisKeyPrefix = "battle:map:fence:"
+	// CoordinatorLeaderTermRedisKey 是 Redis 选主成功时原子递增的持久化任期计数器。
+	CoordinatorLeaderTermRedisKey = "battle:coordinator:leader:term"
 )
 
 var (
@@ -28,6 +30,8 @@ var (
 	ErrGlobalSessionCorrupt = errors.New("stored global session is corrupt")
 	// ErrMapEpochInvariant 表示 owner/epoch 演进违反 fencing 不变量。
 	ErrMapEpochInvariant = errors.New("map epoch invariant violated")
+	// ErrLeaderTermInvariant 表示控制面试图以较旧的 leader term 覆盖已提交拓扑。
+	ErrLeaderTermInvariant = errors.New("leader term invariant violated")
 )
 
 // Topology 是地图路由和主从归属的唯一权威数据源。

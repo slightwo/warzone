@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"battleworld/cluster"
+	"battleworld/elector"
 	"battleworld/protocol"
 	"battleworld/storage"
 	"battleworld/world"
@@ -54,7 +55,21 @@ func (s *fakeControlStore) CompareAndSaveTopology(expectedVersion uint64, topolo
 	return s.compareAndSaveTopology(expectedVersion, topology, "", "", "")
 }
 
+func (s *fakeControlStore) CompareAndSaveTopologyForLeader(expectedVersion uint64, topology storage.Topology, term uint64) error {
+	if term == 0 || topology.LeaderTerm != term {
+		return storage.ErrLeaderTermInvariant
+	}
+	return s.compareAndSaveTopology(expectedVersion, topology, "", "", "")
+}
+
 func (s *fakeControlStore) CompareAndSaveTopologyAndMigrateSessions(expectedVersion uint64, topology storage.Topology, mapID, oldNodeID, newNodeID string) error {
+	return s.compareAndSaveTopology(expectedVersion, topology, mapID, oldNodeID, newNodeID)
+}
+
+func (s *fakeControlStore) CompareAndSaveTopologyAndMigrateSessionsForLeader(expectedVersion uint64, topology storage.Topology, term uint64, mapID, oldNodeID, newNodeID string) error {
+	if term == 0 || topology.LeaderTerm != term {
+		return storage.ErrLeaderTermInvariant
+	}
 	return s.compareAndSaveTopology(expectedVersion, topology, mapID, oldNodeID, newNodeID)
 }
 
@@ -152,6 +167,7 @@ type fakeCoordinatorNodeClient struct {
 	pingErr      error
 	promoteErr   error
 	promoteCalls []uint64
+	onPromote    func()
 	closed       bool
 }
 
@@ -171,9 +187,14 @@ func (c *fakeCoordinatorNodeClient) Checkpoint(context.Context, string) (protoco
 
 func (c *fakeCoordinatorNodeClient) Promote(_ string, _ world.MapConfig, _ protocol.MapCheckpoint, epoch uint64) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.promoteCalls = append(c.promoteCalls, epoch)
-	return c.promoteErr
+	err := c.promoteErr
+	onPromote := c.onPromote
+	c.mu.Unlock()
+	if onPromote != nil {
+		onPromote()
+	}
+	return err
 }
 
 func (c *fakeCoordinatorNodeClient) Close() error {
@@ -194,6 +215,59 @@ func (c *fakeCoordinatorNodeClient) setPromoteErr(err error) {
 	defer c.mu.Unlock()
 	c.promoteErr = err
 }
+
+type fakeLeaderElector struct {
+	mu     sync.Mutex
+	leader bool
+	term   uint64
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func newFakeLeaderElector(term uint64) *fakeLeaderElector {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &fakeLeaderElector{leader: true, term: term, ctx: ctx, cancel: cancel}
+}
+
+func (e *fakeLeaderElector) Campaign(context.Context) (context.Context, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.leader {
+		return nil, elector.ErrNotLeader
+	}
+	return e.ctx, nil
+}
+
+func (e *fakeLeaderElector) IsLeader() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.leader
+}
+
+func (e *fakeLeaderElector) Term() uint64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.leader {
+		return 0
+	}
+	return e.term
+}
+
+func (e *fakeLeaderElector) Resign() error {
+	e.loseLeadership()
+	return nil
+}
+
+func (e *fakeLeaderElector) loseLeadership() {
+	e.mu.Lock()
+	cancel := e.cancel
+	e.leader = false
+	e.term = 0
+	e.mu.Unlock()
+	cancel()
+}
+
+var _ elector.Elector = (*fakeLeaderElector)(nil)
 
 func TestBootstrapTopologyIfAbsentCommitsAndPublishes(t *testing.T) {
 	store := &fakeControlStore{}
@@ -367,6 +441,62 @@ func TestFailoverPromoteFailureLeavesTopologyAndSessionUntouched(t *testing.T) {
 	}
 	if store.casCalls != 0 || len(store.published) != 0 {
 		t.Fatalf("Promote 失败不应 CAS/publish: cas=%d published=%v", store.casCalls, store.published)
+	}
+}
+
+func TestFailoverDoesNotCommitAfterLeaderLeaseLoss(t *testing.T) {
+	current := storage.Topology{
+		Version:    7,
+		LeaderTerm: 8,
+		Owners:     map[string]string{"green": "node-a"},
+		Replicas:   map[string]string{"green": "node-b"},
+		MapEpochs:  map[string]uint64{"green": 4},
+		UpdatedAt:  time.Now().UTC(),
+	}
+	checkpoint := protocol.MapCheckpoint{MapID: "green", NodeID: "node-a", MapEpoch: 4, Version: 12}
+	store := &fakeControlStore{topology: &current, checkpoint: &checkpoint}
+	selectedElector := newFakeLeaderElector(9)
+	replica := &fakeCoordinatorNodeClient{id: "node-b", onPromote: selectedElector.loseLeadership}
+	coordinator, err := newCoordinatorWithElector(store, selectedElector, func(string, string) (cluster.CoordinatorNodeClient, error) {
+		return replica, nil
+	}, []world.MapConfig{{ID: "green"}})
+	if err != nil {
+		t.Fatalf("创建 coordinator: %v", err)
+	}
+	coordinator.mu.Lock()
+	coordinator.nodes["node-b"] = nodeConnection{client: replica, healthy: true}
+	coordinator.mu.Unlock()
+
+	if err := coordinator.failoverMap("green", "node-a"); err == nil {
+		t.Fatal("leader lease 在 Promote 后丢失仍提交了 topology")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.casCalls != 0 || store.topology.Version != 7 || store.topology.Owners["green"] != "node-a" {
+		t.Fatalf("旧 leader 错误提交 topology: cas=%d topology=%+v", store.casCalls, store.topology)
+	}
+}
+
+func TestNonLeaderDoesNotBootstrapTopology(t *testing.T) {
+	store := &fakeControlStore{}
+	selectedElector := newFakeLeaderElector(3)
+	selectedElector.loseLeadership()
+	coordinator, err := newCoordinatorWithElector(store, selectedElector, func(nodeID, _ string) (cluster.CoordinatorNodeClient, error) {
+		return &fakeCoordinatorNodeClient{id: nodeID}, nil
+	}, []world.MapConfig{{ID: "green"}})
+	if err != nil {
+		t.Fatalf("创建 coordinator: %v", err)
+	}
+	if err := coordinator.bootstrapTopologyIfAbsent([]storage.NodeRegistryInfo{
+		{ID: "node-a", Maps: []string{"green"}},
+		{ID: "node-b", Replicas: []string{"green"}},
+	}); err != nil {
+		t.Fatalf("non-leader bootstrap: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.casCalls != 0 || store.topology != nil {
+		t.Fatalf("non-leader 发生 topology 写入: cas=%d topology=%+v", store.casCalls, store.topology)
 	}
 }
 

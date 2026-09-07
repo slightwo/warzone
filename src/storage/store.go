@@ -30,6 +30,15 @@ type Store struct {
 	ctx context.Context
 }
 
+// RedisClient 返回控制面选主使用的 Redis 客户端。业务代码应继续通过 Store 方法访问
+// 数据；该访问器仅用于把同一 Redis 实例注入 token 租约 Elector。
+func (s *Store) RedisClient() *redis.Client {
+	if s == nil {
+		return nil
+	}
+	return s.rdb
+}
+
 type GlobalSession struct {
 	Username string `json:"username"`
 	MapID    string `json:"map_id"`
@@ -374,7 +383,16 @@ func (s *Store) SaveTopology(topology Topology) error {
 // 并在同一个 Lua 事务中同步全部地图的 owner/epoch fence。expectedVersion=0 仅能在
 // 拓扑尚不存在时创建版本 1。
 func (s *Store) CompareAndSaveTopology(expectedVersion uint64, next Topology) error {
-	return s.compareAndSaveTopology(expectedVersion, next, nil)
+	return s.compareAndSaveTopology(expectedVersion, next, nil, 0)
+}
+
+// CompareAndSaveTopologyForLeader 仅允许 current leader term 对应的控制面提交拓扑。
+// term 必须已写入 next；存储层还会拒绝将持久化 topology 的 term 倒退。
+func (s *Store) CompareAndSaveTopologyForLeader(expectedVersion uint64, next Topology, term uint64) error {
+	if term == 0 || next.LeaderTerm != term {
+		return ErrLeaderTermInvariant
+	}
+	return s.compareAndSaveTopology(expectedVersion, next, nil, term)
 }
 
 // CompareAndSaveTopologyAndMigrateSessions 将被切换地图上仍指向 oldNodeID 的全局会话
@@ -384,7 +402,18 @@ func (s *Store) CompareAndSaveTopologyAndMigrateSessions(expectedVersion uint64,
 	if mapID == "" || oldNodeID == "" || newNodeID == "" {
 		return errors.New("session migration map id and node ids are required")
 	}
-	return s.compareAndSaveTopology(expectedVersion, next, &sessionMigration{MapID: mapID, OldNodeID: oldNodeID, NewNodeID: newNodeID})
+	return s.compareAndSaveTopology(expectedVersion, next, &sessionMigration{MapID: mapID, OldNodeID: oldNodeID, NewNodeID: newNodeID}, 0)
+}
+
+// CompareAndSaveTopologyAndMigrateSessionsForLeader 是故障切换使用的 term-fenced CAS。
+func (s *Store) CompareAndSaveTopologyAndMigrateSessionsForLeader(expectedVersion uint64, next Topology, term uint64, mapID, oldNodeID, newNodeID string) error {
+	if term == 0 || next.LeaderTerm != term {
+		return ErrLeaderTermInvariant
+	}
+	if mapID == "" || oldNodeID == "" || newNodeID == "" {
+		return errors.New("session migration map id and node ids are required")
+	}
+	return s.compareAndSaveTopology(expectedVersion, next, &sessionMigration{MapID: mapID, OldNodeID: oldNodeID, NewNodeID: newNodeID}, term)
 }
 
 type sessionMigration struct {
@@ -393,7 +422,7 @@ type sessionMigration struct {
 	NewNodeID string `json:"new_node_id"`
 }
 
-func (s *Store) compareAndSaveTopology(expectedVersion uint64, next Topology, migration *sessionMigration) error {
+func (s *Store) compareAndSaveTopology(expectedVersion uint64, next Topology, migration *sessionMigration, leaderTerm uint64) error {
 	prepared, err := prepareTopology(next)
 	if err != nil {
 		return err
@@ -416,10 +445,11 @@ func (s *Store) compareAndSaveTopology(expectedVersion uint64, next Topology, mi
 		mapIDs = append(mapIDs, mapID)
 	}
 	sort.Strings(mapIDs)
-	keys := make([]string, 2, len(mapIDs)+2)
+	keys := make([]string, 3, len(mapIDs)+3)
 	keys[0] = TopologyRedisKey
 	keys[1] = "global_sessions"
-	args := make([]interface{}, 0, 3+len(mapIDs)*3)
+	keys[2] = CoordinatorLeaderTermRedisKey
+	args := make([]interface{}, 0, 4+len(mapIDs)*3)
 	args = append(args, expectedVersion, payload)
 	if migration == nil {
 		args = append(args, "")
@@ -430,12 +460,29 @@ func (s *Store) compareAndSaveTopology(expectedVersion uint64, next Topology, mi
 		}
 		args = append(args, migrationPayload)
 	}
+	if leaderTerm == 0 {
+		args = append(args, "")
+	} else {
+		args = append(args, strconv.FormatUint(leaderTerm, 10))
+	}
 	for _, mapID := range mapIDs {
 		keys = append(keys, MapFenceRedisKey(mapID))
 		args = append(args, mapID, prepared.Owners[mapID], strconv.FormatUint(prepared.MapEpochs[mapID], 10))
 	}
 
 	const compareAndSetTopology = `
+local nextOK, nextTopology = pcall(cjson.decode, ARGV[2])
+if not nextOK or type(nextTopology) ~= 'table' or type(nextTopology.owners) ~= 'table' or type(nextTopology.map_epochs) ~= 'table' then
+  return -1
+end
+if ARGV[4] ~= '' then
+  local durableTerm = tonumber(redis.call('GET', KEYS[3])) or 0
+  local requestedTerm = tonumber(ARGV[4]) or 0
+  local topologyTerm = tonumber(nextTopology.leader_term) or 0
+  if durableTerm == 0 or durableTerm ~= requestedTerm or topologyTerm ~= durableTerm then
+    return -4
+  end
+end
 local current = redis.call('GET', KEYS[1])
 if not current then
   if ARGV[1] ~= '0' then
@@ -449,11 +496,17 @@ else
   if tonumber(decoded.version) ~= tonumber(ARGV[1]) then
     return 0
   end
-  local nextOK, nextTopology = pcall(cjson.decode, ARGV[2])
-  if not nextOK or type(nextTopology) ~= 'table' or type(nextTopology.owners) ~= 'table' or type(nextTopology.map_epochs) ~= 'table' then
-    return -1
-  end
-  for mapID, currentEpoch in pairs(decoded.map_epochs or {}) do
+local nextOK, nextTopology = pcall(cjson.decode, ARGV[2])
+if not nextOK or type(nextTopology) ~= 'table' or type(nextTopology.owners) ~= 'table' or type(nextTopology.map_epochs) ~= 'table' then
+return -1
+end
+local currentTerm = tonumber(decoded.leader_term) or 0
+local nextTerm = tonumber(nextTopology.leader_term) or 0
+if nextTerm < currentTerm then
+return -4
+end
+for mapID, currentEpoch in pairs(decoded.map_epochs or {}) do
+
     local nextEpoch = tonumber(nextTopology.map_epochs[mapID])
     if not nextEpoch then
       return -3
@@ -497,8 +550,8 @@ if ARGV[3] ~= '' then
 end
 
 redis.call('SET', KEYS[1], ARGV[2])
-local argIndex = 4
-for keyIndex = 3, #KEYS do
+local argIndex = 5
+for keyIndex = 4, #KEYS do
   local fence = cjson.encode({map_id = ARGV[argIndex], owner = ARGV[argIndex + 1], epoch = tonumber(ARGV[argIndex + 2])})
   redis.call('SET', KEYS[keyIndex], fence)
   argIndex = argIndex + 3
@@ -522,6 +575,8 @@ return 1
 		return ErrGlobalSessionCorrupt
 	case -3:
 		return ErrMapEpochInvariant
+	case -4:
+		return ErrLeaderTermInvariant
 	default:
 		return ErrTopologyVersionConflict
 	}

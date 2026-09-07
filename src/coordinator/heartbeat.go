@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func (c *Coordinator) heartbeatLoop() {
+func (c *Coordinator) heartbeatLoop(leaderCtx context.Context) {
 	ticker := time.NewTicker(c.heartbeatInterval)
 	defer ticker.Stop()
 
@@ -14,13 +14,16 @@ func (c *Coordinator) heartbeatLoop() {
 		select {
 		case <-ticker.C:
 			c.heartbeatOnce()
-		case <-c.stopCh:
+		case <-leaderCtx.Done():
 			return
 		}
 	}
 }
 
 func (c *Coordinator) heartbeatOnce() {
+	if _, leader := c.currentLeaderTerm(); !leader {
+		return
+	}
 	c.mu.RLock()
 	nodes := make([]nodeConnection, 0, len(c.nodes))
 	for _, connection := range c.nodes {
@@ -37,6 +40,9 @@ func (c *Coordinator) heartbeatOnce() {
 }
 
 func (c *Coordinator) setNodeHealth(nodeID string, healthy bool) {
+	if _, leader := c.currentLeaderTerm(); !leader {
+		return
+	}
 	c.mu.Lock()
 	connection, ok := c.nodes[nodeID]
 	if !ok || connection.healthy == healthy {

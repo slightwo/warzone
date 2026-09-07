@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -19,6 +20,9 @@ const (
 // ensureBoss 只负责首次初始化。之后的生命值和死亡状态由节点侧原子 Boss RPC 更新，
 // coordinator 仅在满足复活时间后恢复全局状态。
 func (c *Coordinator) ensureBoss() error {
+	if _, leader := c.currentLeaderTerm(); !leader {
+		return nil
+	}
 	_, _, err := c.store.LoadGlobalBoss()
 	if err == nil {
 		return nil
@@ -41,7 +45,7 @@ func (c *Coordinator) ensureBoss() error {
 	return nil
 }
 
-func (c *Coordinator) bossLoop() {
+func (c *Coordinator) bossLoop(leaderCtx context.Context) {
 	ticker := time.NewTicker(bossSyncInterval)
 	defer ticker.Stop()
 
@@ -49,13 +53,16 @@ func (c *Coordinator) bossLoop() {
 		select {
 		case <-ticker.C:
 			c.restoreBossIfDue()
-		case <-c.stopCh:
+		case <-leaderCtx.Done():
 			return
 		}
 	}
 }
 
 func (c *Coordinator) restoreBossIfDue() {
+	if _, leader := c.currentLeaderTerm(); !leader {
+		return
+	}
 	state, hp, err := c.store.LoadGlobalBoss()
 	if err != nil {
 		log.Printf("[coordinator/boss] 读取世界首领状态失败: %v", err)
@@ -98,8 +105,8 @@ func (c *Coordinator) bossSites() []protocol.BossSite {
 	sort.Strings(mapIDs)
 	sites := make([]protocol.BossSite, 0, len(mapIDs))
 	for _, mapID := range mapIDs {
-		config := c.configs[mapID]
-		sites = append(sites, protocol.BossSite{MapID: mapID, X: config.BossX, Y: config.BossY})
+		mapConfig := c.configs[mapID]
+		sites = append(sites, protocol.BossSite{MapID: mapID, X: mapConfig.BossX, Y: mapConfig.BossY})
 	}
 	c.mu.RUnlock()
 	return sites
