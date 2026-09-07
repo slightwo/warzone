@@ -267,6 +267,111 @@ func (s *Store) LoadCheckpoint(mapID string) (*protocol.MapCheckpoint, bool) {
 	return &cp, true
 }
 
+// LoadTopology 读取完整路由拓扑。Key 不存在并非错误，调用方可通过 found=false
+// 判断是否需要受控初始化；持久化数据损坏必须返回错误，绝不能视为一份空拓扑。
+func (s *Store) LoadTopology() (*Topology, bool, error) {
+	data, err := s.rdb.Get(s.ctx, TopologyRedisKey).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("load topology: %w", err)
+	}
+
+	var topology Topology
+	if err := json.Unmarshal(data, &topology); err != nil {
+		return nil, false, fmt.Errorf("%w: decode topology: %v", ErrTopologyCorrupt, err)
+	}
+	if err := topology.Validate(nil); err != nil {
+		return nil, false, fmt.Errorf("%w: %v", ErrTopologyCorrupt, err)
+	}
+	topology.Normalize()
+	return &topology, true, nil
+}
+
+// SaveTopology 写入完整的拓扑文档。该方法仅用于管理修复和受控初始化；正常的
+// 控制面变更必须调用 CompareAndSaveTopology。
+func (s *Store) SaveTopology(topology Topology) error {
+	prepared, err := prepareTopology(topology)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(prepared)
+	if err != nil {
+		return fmt.Errorf("encode topology: %w", err)
+	}
+	if err := s.rdb.Set(s.ctx, TopologyRedisKey, payload, 0).Err(); err != nil {
+		return fmt.Errorf("save topology: %w", err)
+	}
+	return nil
+}
+
+// CompareAndSaveTopology 仅在已存储拓扑的版本等于 expectedVersion 时原子写入 next。
+// expectedVersion=0 仅能在拓扑尚不存在时创建版本 1。
+func (s *Store) CompareAndSaveTopology(expectedVersion uint64, next Topology) error {
+	prepared, err := prepareTopology(next)
+	if err != nil {
+		return err
+	}
+	if expectedVersion == 0 {
+		if prepared.Version != 1 {
+			return fmt.Errorf("initial topology must use version 1, got %d", prepared.Version)
+		}
+	} else if prepared.Version != expectedVersion+1 {
+		return fmt.Errorf("next topology version must be %d, got %d", expectedVersion+1, prepared.Version)
+	}
+
+	payload, err := json.Marshal(prepared)
+	if err != nil {
+		return fmt.Errorf("encode topology: %w", err)
+	}
+
+	const compareAndSetTopology = `
+local current = redis.call('GET', KEYS[1])
+if not current then
+  if ARGV[1] ~= '0' then
+    return 0
+  end
+  redis.call('SET', KEYS[1], ARGV[2])
+  return 1
+end
+
+local ok, decoded = pcall(cjson.decode, current)
+if not ok or type(decoded) ~= 'table' or not decoded.version or tonumber(decoded.version) == nil or tonumber(decoded.version) < 1 then
+  return -1
+end
+if tonumber(decoded.version) ~= tonumber(ARGV[1]) then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[2])
+return 1
+`
+
+	result, err := s.rdb.Eval(s.ctx, compareAndSetTopology, []string{TopologyRedisKey}, expectedVersion, payload).Int()
+	if err != nil {
+		return fmt.Errorf("compare and save topology: %w", err)
+	}
+	if result == -1 {
+		return ErrTopologyCorrupt
+	}
+	if result != 1 {
+		return ErrTopologyVersionConflict
+	}
+	return nil
+}
+
+// PublishTopologyChanged 广播已提交的拓扑版本。消费者必须从 Redis 重新加载拓扑，
+// 不能将该通知载荷视为拓扑数据本身。
+func (s *Store) PublishTopologyChanged(version uint64) error {
+	if version == 0 {
+		return errors.New("topology event version must be greater than zero")
+	}
+	if err := s.rdb.Publish(s.ctx, TopologyEventChannel, strconv.FormatUint(version, 10)).Err(); err != nil {
+		return fmt.Errorf("publish topology change: %w", err)
+	}
+	return nil
+}
+
 // hashPassword 生成 bcrypt 哈希；失败时返回 error。
 func hashPassword(password string) (string, error) {
 	b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -361,7 +466,7 @@ func (s *Store) PublishEvent(channel, event string) error {
 
 // SubscribeEvents subscribes to all relevant event channels and returns the message channel.
 func (s *Store) SubscribeEvents() *redis.PubSub {
-	pubsub := s.rdb.Subscribe(s.ctx, "events:global")
+	pubsub := s.rdb.Subscribe(s.ctx, "events:global", TopologyEventChannel)
 	pubsub.PSubscribe(s.ctx, "events:map:*", "events:user:*")
 	return pubsub
 }
