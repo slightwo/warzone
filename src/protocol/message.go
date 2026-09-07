@@ -196,6 +196,7 @@ type HotSession struct {
 type MapCheckpoint struct {
 	MapID      string         `json:"map_id"`
 	NodeID     string         `json:"node_id"`
+	MapEpoch   uint64         `json:"map_epoch"`
 	Version    int64          `json:"version"`
 	Terrain    []string       `json:"terrain"`
 	Players    []PlayerView   `json:"players"`

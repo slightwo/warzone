@@ -13,6 +13,8 @@ const (
 	TopologyRedisKey = "battle:topology"
 	// TopologyEventChannel 用于通知消费者存在可加载的新拓扑版本。
 	TopologyEventChannel = "events:topology"
+	// MapFenceRedisKeyPrefix 保存地图当前 owner 和 epoch 的原子写入 fence。
+	MapFenceRedisKeyPrefix = "battle:map:fence:"
 )
 
 var (
@@ -20,6 +22,12 @@ var (
 	ErrTopologyVersionConflict = errors.New("topology version conflict")
 	// ErrTopologyCorrupt 表示 Redis 中持久化的拓扑数据已损坏，不能继续信任。
 	ErrTopologyCorrupt = errors.New("stored topology is corrupt")
+	// ErrMapFenceRejected 表示 checkpoint 写入方不再匹配当前地图的 owner/epoch fence。
+	ErrMapFenceRejected = errors.New("map fence rejected")
+	// ErrGlobalSessionCorrupt 表示迁移时发现持久化会话不是合法 JSON，不能提交半完成的切换。
+	ErrGlobalSessionCorrupt = errors.New("stored global session is corrupt")
+	// ErrMapEpochInvariant 表示 owner/epoch 演进违反 fencing 不变量。
+	ErrMapEpochInvariant = errors.New("map epoch invariant violated")
 )
 
 // Topology 是地图路由和主从归属的唯一权威数据源。
@@ -130,6 +138,11 @@ func cloneStringMap(source map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+// MapFenceRedisKey 返回单张地图 fence 的 Redis key。
+func MapFenceRedisKey(mapID string) string {
+	return MapFenceRedisKeyPrefix + mapID
 }
 
 func cloneUint64Map(source map[string]uint64) map[string]uint64 {

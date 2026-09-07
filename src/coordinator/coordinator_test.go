@@ -17,6 +17,8 @@ type fakeControlStore struct {
 	mu          sync.Mutex
 	activeNodes []storage.NodeRegistryInfo
 	topology    *storage.Topology
+	checkpoint  *protocol.MapCheckpoint
+	sessions    []storage.GlobalSession
 	loadErr     error
 	casErr      error
 	casCalls    int
@@ -49,18 +51,48 @@ func (s *fakeControlStore) LoadTopology() (*storage.Topology, bool, error) {
 }
 
 func (s *fakeControlStore) CompareAndSaveTopology(expectedVersion uint64, topology storage.Topology) error {
+	return s.compareAndSaveTopology(expectedVersion, topology, "", "", "")
+}
+
+func (s *fakeControlStore) CompareAndSaveTopologyAndMigrateSessions(expectedVersion uint64, topology storage.Topology, mapID, oldNodeID, newNodeID string) error {
+	return s.compareAndSaveTopology(expectedVersion, topology, mapID, oldNodeID, newNodeID)
+}
+
+func (s *fakeControlStore) compareAndSaveTopology(expectedVersion uint64, topology storage.Topology, mapID, oldNodeID, newNodeID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.casCalls++
 	if s.casErr != nil {
 		return s.casErr
 	}
-	if expectedVersion != 0 || s.topology != nil {
+	if expectedVersion == 0 {
+		if s.topology != nil {
+			return storage.ErrTopologyVersionConflict
+		}
+	} else if s.topology == nil || s.topology.Version != expectedVersion {
 		return storage.ErrTopologyVersionConflict
 	}
 	clone := topology.Clone()
 	s.topology = &clone
+	if mapID != "" {
+		for index := range s.sessions {
+			if s.sessions[index].MapID == mapID && s.sessions[index].NodeID == oldNodeID {
+				s.sessions[index].NodeID = newNodeID
+				s.sessions[index].Version++
+			}
+		}
+	}
 	return nil
+}
+
+func (s *fakeControlStore) LoadCheckpoint(string) (*protocol.MapCheckpoint, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.checkpoint == nil {
+		return nil, false
+	}
+	clone := *s.checkpoint
+	return &clone, true
 }
 
 func (s *fakeControlStore) PublishTopologyChanged(version uint64) error {
@@ -115,10 +147,12 @@ func (s *fakeControlStore) PublishEvent(channel, event string) error {
 }
 
 type fakeCoordinatorNodeClient struct {
-	mu      sync.Mutex
-	id      string
-	pingErr error
-	closed  bool
+	mu           sync.Mutex
+	id           string
+	pingErr      error
+	promoteErr   error
+	promoteCalls []uint64
+	closed       bool
 }
 
 func (c *fakeCoordinatorNodeClient) NodeID() string { return c.id }
@@ -135,7 +169,12 @@ func (c *fakeCoordinatorNodeClient) Checkpoint(context.Context, string) (protoco
 	return protocol.MapCheckpoint{}, nil
 }
 
-func (c *fakeCoordinatorNodeClient) Promote(string, world.MapConfig) error { return nil }
+func (c *fakeCoordinatorNodeClient) Promote(_ string, _ world.MapConfig, _ protocol.MapCheckpoint, epoch uint64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.promoteCalls = append(c.promoteCalls, epoch)
+	return c.promoteErr
+}
 
 func (c *fakeCoordinatorNodeClient) Close() error {
 	c.mu.Lock()
@@ -148,6 +187,12 @@ func (c *fakeCoordinatorNodeClient) setPingErr(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pingErr = err
+}
+
+func (c *fakeCoordinatorNodeClient) setPromoteErr(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.promoteErr = err
 }
 
 func TestBootstrapTopologyIfAbsentCommitsAndPublishes(t *testing.T) {
@@ -235,6 +280,93 @@ func TestConnectedNodeRegistrationsAndHeartbeat(t *testing.T) {
 	coordinator.mu.RUnlock()
 	if !healthy {
 		t.Fatal("心跳恢复后 node-a 未恢复健康标记")
+	}
+}
+
+func TestFailoverPromotesReplicaAndMigratesSessions(t *testing.T) {
+	current := storage.Topology{
+		Version:   7,
+		Owners:    map[string]string{"green": "node-a"},
+		Replicas:  map[string]string{"green": "node-b"},
+		MapEpochs: map[string]uint64{"green": 4},
+		UpdatedAt: time.Now().UTC(),
+	}
+	checkpoint := protocol.MapCheckpoint{MapID: "green", NodeID: "node-a", MapEpoch: 4, Version: 12}
+	store := &fakeControlStore{
+		topology:   &current,
+		checkpoint: &checkpoint,
+		sessions:   []storage.GlobalSession{{Username: "player-a", MapID: "green", NodeID: "node-a", Version: 3}},
+	}
+	replica := &fakeCoordinatorNodeClient{id: "node-b"}
+	coordinator, err := newCoordinator(store, func(nodeID, _ string) (cluster.CoordinatorNodeClient, error) {
+		if nodeID == "node-b" {
+			return replica, nil
+		}
+		return &fakeCoordinatorNodeClient{id: nodeID}, nil
+	}, []world.MapConfig{{ID: "green"}})
+	if err != nil {
+		t.Fatalf("创建 coordinator: %v", err)
+	}
+	coordinator.mu.Lock()
+	coordinator.nodes["node-b"] = nodeConnection{client: replica, healthy: true}
+	coordinator.mu.Unlock()
+
+	if err := coordinator.failoverMap("green", "node-a"); err != nil {
+		t.Fatalf("故障切换: %v", err)
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.topology.Version != 8 || store.topology.Owners["green"] != "node-b" || store.topology.MapEpochs["green"] != 5 {
+		t.Fatalf("错误的故障转移拓扑: %+v", store.topology)
+	}
+	if len(store.sessions) != 1 || store.sessions[0].NodeID != "node-b" || store.sessions[0].Version != 4 {
+		t.Fatalf("会话未原子迁移: %+v", store.sessions)
+	}
+	if len(store.published) != 1 || store.published[0] != 8 {
+		t.Fatalf("未发布 topology 版本 8: %v", store.published)
+	}
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+	if len(replica.promoteCalls) != 1 || replica.promoteCalls[0] != 5 {
+		t.Fatalf("Promote epoch = %v，want [5]", replica.promoteCalls)
+	}
+}
+
+func TestFailoverPromoteFailureLeavesTopologyAndSessionUntouched(t *testing.T) {
+	current := storage.Topology{
+		Version:   7,
+		Owners:    map[string]string{"green": "node-a"},
+		Replicas:  map[string]string{"green": "node-b"},
+		MapEpochs: map[string]uint64{"green": 4},
+		UpdatedAt: time.Now().UTC(),
+	}
+	checkpoint := protocol.MapCheckpoint{MapID: "green", NodeID: "node-a", MapEpoch: 4, Version: 12}
+	store := &fakeControlStore{
+		topology:   &current,
+		checkpoint: &checkpoint,
+		sessions:   []storage.GlobalSession{{Username: "player-a", MapID: "green", NodeID: "node-a", Version: 3}},
+	}
+	replica := &fakeCoordinatorNodeClient{id: "node-b", promoteErr: errors.New("promote failed")}
+	coordinator, err := newCoordinator(store, func(string, string) (cluster.CoordinatorNodeClient, error) {
+		return replica, nil
+	}, []world.MapConfig{{ID: "green"}})
+	if err != nil {
+		t.Fatalf("创建 coordinator: %v", err)
+	}
+	coordinator.mu.Lock()
+	coordinator.nodes["node-b"] = nodeConnection{client: replica, healthy: true}
+	coordinator.mu.Unlock()
+
+	if err := coordinator.failoverMap("green", "node-a"); err == nil {
+		t.Fatal("Promote 失败仍返回 nil")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.topology.Version != 7 || store.topology.Owners["green"] != "node-a" || store.sessions[0].NodeID != "node-a" {
+		t.Fatalf("Promote 失败后错误修改状态: topology=%+v sessions=%+v", store.topology, store.sessions)
+	}
+	if store.casCalls != 0 || len(store.published) != 0 {
+		t.Fatalf("Promote 失败不应 CAS/publish: cas=%d published=%v", store.casCalls, store.published)
 	}
 }
 

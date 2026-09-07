@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -256,6 +257,71 @@ func (s *Store) SaveCheckpoint(cp protocol.MapCheckpoint) error {
 	return s.rdb.HSet(s.ctx, "checkpoints", cp.MapID, data).Err()
 }
 
+// SaveCheckpointIfOwner 仅在 Redis 中的地图 fence 与 nodeID/epoch 同时匹配时保存
+// checkpoint。即使旧 owner 尚未刷新本地拓扑，也无法覆盖已切换到新 epoch 的快照。
+func (s *Store) SaveCheckpointIfOwner(cp protocol.MapCheckpoint, nodeID string, epoch uint64) error {
+	if cp.MapID == "" {
+		return errors.New("checkpoint map id is required")
+	}
+	if nodeID == "" {
+		return errors.New("checkpoint owner node id is required")
+	}
+	if epoch == 0 {
+		return errors.New("checkpoint map epoch must be greater than zero")
+	}
+	if cp.NodeID != nodeID || cp.MapEpoch != epoch {
+		return fmt.Errorf("checkpoint ownership mismatch: checkpoint=(%q,%d), request=(%q,%d)", cp.NodeID, cp.MapEpoch, nodeID, epoch)
+	}
+	data, err := json.Marshal(cp)
+	if err != nil {
+		return err
+	}
+
+	const saveCheckpointIfOwner = `
+local fence = redis.call('GET', KEYS[1])
+if not fence then
+  return 0
+end
+local ok, decoded = pcall(cjson.decode, fence)
+if not ok or type(decoded) ~= 'table' or decoded.owner == nil or decoded.epoch == nil then
+  return -1
+end
+if decoded.owner ~= ARGV[1] or tostring(decoded.epoch) ~= ARGV[2] then
+  return 0
+end
+redis.call('HSET', KEYS[2], ARGV[3], ARGV[4])
+return 1
+`
+	result, err := s.rdb.Eval(s.ctx, saveCheckpointIfOwner, []string{MapFenceRedisKey(cp.MapID), "checkpoints"}, nodeID, strconv.FormatUint(epoch, 10), cp.MapID, data).Int()
+	if err != nil {
+		return fmt.Errorf("save fenced checkpoint: %w", err)
+	}
+	if result != 1 {
+		return ErrMapFenceRejected
+	}
+	return nil
+}
+
+// RequireMapFence 即时读取 Redis fence，确认节点仍是 mapID 在 epoch 下的 owner。
+// 节点在每个本地 world 写入前调用它，避免仅凭可能滞后的拓扑缓存继续接受旧主写入。
+func (s *Store) RequireMapFence(mapID, nodeID string, epoch uint64) error {
+	if mapID == "" || nodeID == "" || epoch == 0 {
+		return ErrMapFenceRejected
+	}
+	data, err := s.rdb.Get(s.ctx, MapFenceRedisKey(mapID)).Bytes()
+	if err != nil {
+		return ErrMapFenceRejected
+	}
+	var fence struct {
+		Owner string `json:"owner"`
+		Epoch uint64 `json:"epoch"`
+	}
+	if err := json.Unmarshal(data, &fence); err != nil || fence.Owner != nodeID || fence.Epoch != epoch {
+		return ErrMapFenceRejected
+	}
+	return nil
+}
+
 func (s *Store) LoadCheckpoint(mapID string) (*protocol.MapCheckpoint, bool) {
 	data, err := s.rdb.HGet(s.ctx, "checkpoints", mapID).Bytes()
 	if err != nil {
@@ -291,26 +357,43 @@ func (s *Store) LoadTopology() (*Topology, bool, error) {
 	return &topology, true, nil
 }
 
-// SaveTopology 写入完整的拓扑文档。该方法仅用于管理修复和受控初始化；正常的
-// 控制面变更必须调用 CompareAndSaveTopology。
+// SaveTopology 通过版本化 CAS 写入完整拓扑，确保管理修复也会同步更新地图 fence。
+// 它不再执行无条件 SET；正常控制面变更仍应直接调用 CompareAndSaveTopology。
 func (s *Store) SaveTopology(topology Topology) error {
-	prepared, err := prepareTopology(topology)
+	current, found, err := s.LoadTopology()
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(prepared)
-	if err != nil {
-		return fmt.Errorf("encode topology: %w", err)
+	if !found {
+		return s.CompareAndSaveTopology(0, topology)
 	}
-	if err := s.rdb.Set(s.ctx, TopologyRedisKey, payload, 0).Err(); err != nil {
-		return fmt.Errorf("save topology: %w", err)
-	}
-	return nil
+	return s.CompareAndSaveTopology(current.Version, topology)
 }
 
-// CompareAndSaveTopology 仅在已存储拓扑的版本等于 expectedVersion 时原子写入 next。
-// expectedVersion=0 仅能在拓扑尚不存在时创建版本 1。
+// CompareAndSaveTopology 仅在已存储拓扑的版本等于 expectedVersion 时原子写入 next，
+// 并在同一个 Lua 事务中同步全部地图的 owner/epoch fence。expectedVersion=0 仅能在
+// 拓扑尚不存在时创建版本 1。
 func (s *Store) CompareAndSaveTopology(expectedVersion uint64, next Topology) error {
+	return s.compareAndSaveTopology(expectedVersion, next, nil)
+}
+
+// CompareAndSaveTopologyAndMigrateSessions 将被切换地图上仍指向 oldNodeID 的全局会话
+// 原子迁移至 newNodeID。会话解码失败、拓扑版本冲突或 Lua 运行错误时，topology、fence
+// 与会话均不写入，避免暴露半提交状态。
+func (s *Store) CompareAndSaveTopologyAndMigrateSessions(expectedVersion uint64, next Topology, mapID, oldNodeID, newNodeID string) error {
+	if mapID == "" || oldNodeID == "" || newNodeID == "" {
+		return errors.New("session migration map id and node ids are required")
+	}
+	return s.compareAndSaveTopology(expectedVersion, next, &sessionMigration{MapID: mapID, OldNodeID: oldNodeID, NewNodeID: newNodeID})
+}
+
+type sessionMigration struct {
+	MapID     string `json:"map_id"`
+	OldNodeID string `json:"old_node_id"`
+	NewNodeID string `json:"new_node_id"`
+}
+
+func (s *Store) compareAndSaveTopology(expectedVersion uint64, next Topology, migration *sessionMigration) error {
 	prepared, err := prepareTopology(next)
 	if err != nil {
 		return err
@@ -328,38 +411,120 @@ func (s *Store) CompareAndSaveTopology(expectedVersion uint64, next Topology) er
 		return fmt.Errorf("encode topology: %w", err)
 	}
 
+	mapIDs := make([]string, 0, len(prepared.Owners))
+	for mapID := range prepared.Owners {
+		mapIDs = append(mapIDs, mapID)
+	}
+	sort.Strings(mapIDs)
+	keys := make([]string, 2, len(mapIDs)+2)
+	keys[0] = TopologyRedisKey
+	keys[1] = "global_sessions"
+	args := make([]interface{}, 0, 3+len(mapIDs)*3)
+	args = append(args, expectedVersion, payload)
+	if migration == nil {
+		args = append(args, "")
+	} else {
+		migrationPayload, err := json.Marshal(migration)
+		if err != nil {
+			return fmt.Errorf("encode session migration: %w", err)
+		}
+		args = append(args, migrationPayload)
+	}
+	for _, mapID := range mapIDs {
+		keys = append(keys, MapFenceRedisKey(mapID))
+		args = append(args, mapID, prepared.Owners[mapID], strconv.FormatUint(prepared.MapEpochs[mapID], 10))
+	}
+
 	const compareAndSetTopology = `
 local current = redis.call('GET', KEYS[1])
 if not current then
   if ARGV[1] ~= '0' then
     return 0
   end
-  redis.call('SET', KEYS[1], ARGV[2])
-  return 1
+else
+  local ok, decoded = pcall(cjson.decode, current)
+  if not ok or type(decoded) ~= 'table' or not decoded.version or tonumber(decoded.version) == nil or tonumber(decoded.version) < 1 then
+    return -1
+  end
+  if tonumber(decoded.version) ~= tonumber(ARGV[1]) then
+    return 0
+  end
+  local nextOK, nextTopology = pcall(cjson.decode, ARGV[2])
+  if not nextOK or type(nextTopology) ~= 'table' or type(nextTopology.owners) ~= 'table' or type(nextTopology.map_epochs) ~= 'table' then
+    return -1
+  end
+  for mapID, currentEpoch in pairs(decoded.map_epochs or {}) do
+    local nextEpoch = tonumber(nextTopology.map_epochs[mapID])
+    if not nextEpoch then
+      return -3
+    end
+    local currentOwner = (decoded.owners or {})[mapID] or ''
+    local nextOwner = nextTopology.owners[mapID] or ''
+    if currentOwner ~= nextOwner then
+      if nextEpoch ~= tonumber(currentEpoch) + 1 then
+        return -3
+      end
+    elseif nextEpoch ~= tonumber(currentEpoch) then
+      return -3
+    end
+  end
+  for mapID, nextEpoch in pairs(nextTopology.map_epochs) do
+    if (decoded.map_epochs or {})[mapID] == nil and tonumber(nextEpoch) ~= 1 then
+      return -3
+    end
+  end
 end
 
-local ok, decoded = pcall(cjson.decode, current)
-if not ok or type(decoded) ~= 'table' or not decoded.version or tonumber(decoded.version) == nil or tonumber(decoded.version) < 1 then
-  return -1
+local updates = {}
+if ARGV[3] ~= '' then
+  local migrationOK, migration = pcall(cjson.decode, ARGV[3])
+  if not migrationOK or type(migration) ~= 'table' then
+    return -2
+  end
+  local sessions = redis.call('HGETALL', KEYS[2])
+  for index = 1, #sessions, 2 do
+    local sessionOK, session = pcall(cjson.decode, sessions[index + 1])
+    if not sessionOK or type(session) ~= 'table' then
+      return -2
+    end
+    if session.map_id == migration.map_id and session.node_id == migration.old_node_id then
+      session.node_id = migration.new_node_id
+      session.version = (tonumber(session.version) or 0) + 1
+      table.insert(updates, sessions[index])
+      table.insert(updates, cjson.encode(session))
+    end
+  end
 end
-if tonumber(decoded.version) ~= tonumber(ARGV[1]) then
-  return 0
-end
+
 redis.call('SET', KEYS[1], ARGV[2])
+local argIndex = 4
+for keyIndex = 3, #KEYS do
+  local fence = cjson.encode({map_id = ARGV[argIndex], owner = ARGV[argIndex + 1], epoch = tonumber(ARGV[argIndex + 2])})
+  redis.call('SET', KEYS[keyIndex], fence)
+  argIndex = argIndex + 3
+end
+if #updates > 0 then
+  redis.call('HSET', KEYS[2], unpack(updates))
+end
 return 1
 `
 
-	result, err := s.rdb.Eval(s.ctx, compareAndSetTopology, []string{TopologyRedisKey}, expectedVersion, payload).Int()
+	result, err := s.rdb.Eval(s.ctx, compareAndSetTopology, keys, args...).Int()
 	if err != nil {
 		return fmt.Errorf("compare and save topology: %w", err)
 	}
-	if result == -1 {
+	switch result {
+	case 1:
+		return nil
+	case -1:
 		return ErrTopologyCorrupt
-	}
-	if result != 1 {
+	case -2:
+		return ErrGlobalSessionCorrupt
+	case -3:
+		return ErrMapEpochInvariant
+	default:
 		return ErrTopologyVersionConflict
 	}
-	return nil
 }
 
 // PublishTopologyChanged 广播已提交的拓扑版本。消费者必须从 Redis 重新加载拓扑，

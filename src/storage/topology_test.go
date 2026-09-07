@@ -156,6 +156,7 @@ func TestTopologyStoreCompareAndSave(t *testing.T) {
 	next.Version = 2
 	next.Owners["green"] = "node-b"
 	next.Replicas["green"] = "node-c"
+	next.MapEpochs["green"] = 2
 	next.UpdatedAt = time.Now().UTC()
 	if err := store.CompareAndSaveTopology(1, next); err != nil {
 		t.Fatalf("advance topology: %v", err)

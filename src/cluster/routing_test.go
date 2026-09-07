@@ -16,31 +16,31 @@ type fakeGatewayNodeClient struct {
 }
 
 func (c *fakeGatewayNodeClient) NodeID() string { return c.id }
-func (c *fakeGatewayNodeClient) AddPlayer(context.Context, string, *protocol.UserProfile) error {
+func (c *fakeGatewayNodeClient) AddPlayer(context.Context, string, uint64, *protocol.UserProfile) error {
 	return nil
 }
-func (c *fakeGatewayNodeClient) RemovePlayer(context.Context, string, string) (protocol.UserProfile, bool, error) {
+func (c *fakeGatewayNodeClient) RemovePlayer(context.Context, string, string, uint64) (protocol.UserProfile, bool, error) {
 	return protocol.UserProfile{}, false, nil
 }
-func (c *fakeGatewayNodeClient) MovePlayer(context.Context, string, string, string) (string, protocol.UserProfile, bool, error) {
+func (c *fakeGatewayNodeClient) MovePlayer(context.Context, string, string, string, uint64) (string, protocol.UserProfile, bool, error) {
 	return "", protocol.UserProfile{}, false, nil
 }
-func (c *fakeGatewayNodeClient) Attack(context.Context, string, string) (string, string, string, protocol.UserProfile, bool, error) {
+func (c *fakeGatewayNodeClient) Attack(context.Context, string, string, uint64) (string, string, string, protocol.UserProfile, bool, error) {
 	return "", "", "", protocol.UserProfile{}, false, nil
 }
-func (c *fakeGatewayNodeClient) Heal(context.Context, string, string) (string, protocol.UserProfile, bool, error) {
+func (c *fakeGatewayNodeClient) Heal(context.Context, string, string, uint64) (string, protocol.UserProfile, bool, error) {
 	return "", protocol.UserProfile{}, false, nil
 }
-func (c *fakeGatewayNodeClient) BuyItem(context.Context, string, string, string) (string, protocol.UserProfile, bool, error) {
+func (c *fakeGatewayNodeClient) BuyItem(context.Context, string, string, string, uint64) (string, protocol.UserProfile, bool, error) {
 	return "", protocol.UserProfile{}, false, nil
 }
-func (c *fakeGatewayNodeClient) AttackBoss(context.Context, string, string) (string, protocol.UserProfile, bool, error) {
+func (c *fakeGatewayNodeClient) AttackBoss(context.Context, string, string, uint64) (string, protocol.UserProfile, bool, error) {
 	return "", protocol.UserProfile{}, false, nil
 }
 func (c *fakeGatewayNodeClient) Profile(context.Context, string, string) (protocol.UserProfile, bool, error) {
 	return protocol.UserProfile{}, false, nil
 }
-func (c *fakeGatewayNodeClient) RewardPlayer(context.Context, string, string, int, int) (protocol.UserProfile, bool, error) {
+func (c *fakeGatewayNodeClient) RewardPlayer(context.Context, string, string, int, int, uint64) (protocol.UserProfile, bool, error) {
 	return protocol.UserProfile{}, false, nil
 }
 func (c *fakeGatewayNodeClient) Snapshot(context.Context, string) (protocol.MapView, error) {

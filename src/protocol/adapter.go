@@ -390,6 +390,7 @@ func ToProtoMapCheckpoint(c MapCheckpoint) *pb.MapCheckpoint {
 	cp := &pb.MapCheckpoint{
 		MapId:      c.MapID,
 		NodeId:     c.NodeID,
+		MapEpoch:   c.MapEpoch,
 		Version:    c.Version,
 		Terrain:    c.Terrain,
 		Checkpoint: c.Checkpoint.Format(time.RFC3339),
@@ -414,6 +415,7 @@ func FromProtoMapCheckpoint(c *pb.MapCheckpoint) MapCheckpoint {
 	cp := MapCheckpoint{
 		MapID:      c.MapId,
 		NodeID:     c.NodeId,
+		MapEpoch:   c.MapEpoch,
 		Version:    c.Version,
 		Terrain:    c.Terrain,
 		Checkpoint: t,

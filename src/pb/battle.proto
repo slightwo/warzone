@@ -143,6 +143,7 @@ message UserProfile {
 message AddPlayerReq {
     string map_id = 1;
     UserProfile profile = 2;
+    uint64 map_epoch = 3;
 }
 
 message AddPlayerResp {
@@ -152,6 +153,7 @@ message AddPlayerResp {
 message RemovePlayerReq {
     string map_id = 1;
     string username = 2;
+    uint64 map_epoch = 3;
 }
 
 message RemovePlayerResp {
@@ -163,6 +165,7 @@ message MovePlayerReq {
     string map_id = 1;
     string username = 2;
     string dir = 3;
+    uint64 map_epoch = 4;
 }
 
 message MovePlayerResp {
@@ -174,6 +177,7 @@ message MovePlayerResp {
 message AttackReq {
     string map_id = 1;
     string username = 2;
+    uint64 map_epoch = 3;
 }
 
 message AttackResp {
@@ -215,6 +219,7 @@ service NodeService {
 message AttackBossReq {
     string map_id = 1;
     string username = 2;
+    uint64 map_epoch = 3;
 }
 
 message AttackBossResp {
@@ -223,7 +228,10 @@ message AttackBossResp {
     bool ok = 3;
 }
 
-message BackgroundStepReq {}
+message BackgroundStepReq {
+    string map_id = 1;
+    uint64 map_epoch = 2;
+}
 
 message BackgroundStepResp {
     repeated MapEvents events = 1;
@@ -237,6 +245,7 @@ message MapEvents {
 message HealReq {
     string map_id = 1;
     string username = 2;
+    uint64 map_epoch = 3;
 }
 
 message HealResp {
@@ -249,6 +258,7 @@ message BuyItemReq {
     string map_id = 1;
     string username = 2;
     string item = 3;
+    uint64 map_epoch = 4;
 }
 
 message BuyItemResp {
@@ -272,6 +282,7 @@ message RewardPlayerReq {
     string username = 2;
     int32 treasure_delta = 3;
     int32 victory_delta = 4;
+    uint64 map_epoch = 5;
 }
 
 message RewardPlayerResp {
@@ -315,6 +326,7 @@ message MapCheckpoint {
     repeated NPCView npcs = 6;
     repeated TreasureView treasures = 7;
     string checkpoint = 8;
+    uint64 map_epoch = 9;
 }
 
 message StoreReplicaReq {
@@ -327,6 +339,8 @@ message StoreReplicaResp {
 
 message PromoteReq {
     string map_id = 1;
+    uint64 map_epoch = 2;
+    MapCheckpoint checkpoint = 3;
 }
 
 message PromoteResp {

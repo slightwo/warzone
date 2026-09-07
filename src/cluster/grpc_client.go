@@ -39,19 +39,21 @@ func (c *NodeGRPCClient) NodeID() string {
 	return c.id
 }
 
-func (c *NodeGRPCClient) AddPlayer(ctx context.Context, mapID string, profile *protocol.UserProfile) error {
+func (c *NodeGRPCClient) AddPlayer(ctx context.Context, mapID string, epoch uint64, profile *protocol.UserProfile) error {
 	req := &pb.AddPlayerReq{
-		MapId:   mapID,
-		Profile: protocol.ToProtoUserProfile(*profile),
+		MapId:    mapID,
+		Profile:  protocol.ToProtoUserProfile(*profile),
+		MapEpoch: epoch,
 	}
 	_, err := c.client.AddPlayer(ctx, req)
 	return err
 }
 
-func (c *NodeGRPCClient) RemovePlayer(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error) {
+func (c *NodeGRPCClient) RemovePlayer(ctx context.Context, mapID, username string, epoch uint64) (protocol.UserProfile, bool, error) {
 	req := &pb.RemovePlayerReq{
 		MapId:    mapID,
 		Username: username,
+		MapEpoch: epoch,
 	}
 	resp, err := c.client.RemovePlayer(ctx, req)
 	if err != nil {
@@ -60,11 +62,12 @@ func (c *NodeGRPCClient) RemovePlayer(ctx context.Context, mapID, username strin
 	return protocol.FromProtoUserProfile(resp.Profile), resp.Ok, nil
 }
 
-func (c *NodeGRPCClient) MovePlayer(ctx context.Context, mapID, username, dir string) (string, protocol.UserProfile, bool, error) {
+func (c *NodeGRPCClient) MovePlayer(ctx context.Context, mapID, username, dir string, epoch uint64) (string, protocol.UserProfile, bool, error) {
 	req := &pb.MovePlayerReq{
 		MapId:    mapID,
 		Username: username,
 		Dir:      dir,
+		MapEpoch: epoch,
 	}
 	resp, err := c.client.MovePlayer(ctx, req)
 	if err != nil {
@@ -73,10 +76,11 @@ func (c *NodeGRPCClient) MovePlayer(ctx context.Context, mapID, username, dir st
 	return resp.Text, protocol.FromProtoUserProfile(resp.Profile), resp.Ok, nil
 }
 
-func (c *NodeGRPCClient) Attack(ctx context.Context, mapID, username string) (string, string, string, protocol.UserProfile, bool, error) {
+func (c *NodeGRPCClient) Attack(ctx context.Context, mapID, username string, epoch uint64) (string, string, string, protocol.UserProfile, bool, error) {
 	req := &pb.AttackReq{
 		MapId:    mapID,
 		Username: username,
+		MapEpoch: epoch,
 	}
 	resp, err := c.client.Attack(ctx, req)
 	if err != nil {
@@ -85,10 +89,11 @@ func (c *NodeGRPCClient) Attack(ctx context.Context, mapID, username string) (st
 	return resp.Log, resp.BLog, resp.GmLog, protocol.FromProtoUserProfile(resp.Profile), resp.Ok, nil
 }
 
-func (c *NodeGRPCClient) Heal(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error) {
+func (c *NodeGRPCClient) Heal(ctx context.Context, mapID, username string, epoch uint64) (string, protocol.UserProfile, bool, error) {
 	req := &pb.HealReq{
 		MapId:    mapID,
 		Username: username,
+		MapEpoch: epoch,
 	}
 	resp, err := c.client.Heal(ctx, req)
 	if err != nil {
@@ -97,11 +102,12 @@ func (c *NodeGRPCClient) Heal(ctx context.Context, mapID, username string) (stri
 	return resp.Text, protocol.FromProtoUserProfile(resp.Profile), resp.Ok, nil
 }
 
-func (c *NodeGRPCClient) BuyItem(ctx context.Context, mapID, username, item string) (string, protocol.UserProfile, bool, error) {
+func (c *NodeGRPCClient) BuyItem(ctx context.Context, mapID, username, item string, epoch uint64) (string, protocol.UserProfile, bool, error) {
 	req := &pb.BuyItemReq{
 		MapId:    mapID,
 		Username: username,
 		Item:     item,
+		MapEpoch: epoch,
 	}
 	resp, err := c.client.BuyItem(ctx, req)
 	if err != nil {
@@ -110,10 +116,11 @@ func (c *NodeGRPCClient) BuyItem(ctx context.Context, mapID, username, item stri
 	return resp.Text, protocol.FromProtoUserProfile(resp.Profile), resp.Ok, nil
 }
 
-func (c *NodeGRPCClient) AttackBoss(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error) {
+func (c *NodeGRPCClient) AttackBoss(ctx context.Context, mapID, username string, epoch uint64) (string, protocol.UserProfile, bool, error) {
 	req := &pb.AttackBossReq{
 		MapId:    mapID,
 		Username: username,
+		MapEpoch: epoch,
 	}
 	resp, err := c.client.AttackBoss(ctx, req)
 	if err != nil {
@@ -134,12 +141,13 @@ func (c *NodeGRPCClient) Profile(ctx context.Context, mapID, username string) (p
 	return protocol.FromProtoUserProfile(resp.Profile), resp.Ok, nil
 }
 
-func (c *NodeGRPCClient) RewardPlayer(ctx context.Context, mapID, username string, treasureDelta, victoryDelta int) (protocol.UserProfile, bool, error) {
+func (c *NodeGRPCClient) RewardPlayer(ctx context.Context, mapID, username string, treasureDelta, victoryDelta int, epoch uint64) (protocol.UserProfile, bool, error) {
 	req := &pb.RewardPlayerReq{
 		MapId:         mapID,
 		Username:      username,
 		TreasureDelta: int32(treasureDelta),
 		VictoryDelta:  int32(victoryDelta),
+		MapEpoch:      epoch,
 	}
 	resp, err := c.client.RewardPlayer(ctx, req)
 	if err != nil {
@@ -187,9 +195,11 @@ func (c *NodeGRPCClient) Checkpoint(ctx context.Context, mapID string) (protocol
 	return protocol.FromProtoMapCheckpoint(resp.Checkpoint), nil
 }
 
-func (c *NodeGRPCClient) Promote(mapID string, cfg world.MapConfig) error {
+func (c *NodeGRPCClient) Promote(mapID string, cfg world.MapConfig, checkpoint protocol.MapCheckpoint, epoch uint64) error {
 	req := &pb.PromoteReq{
-		MapId: mapID,
+		MapId:     mapID,
+		MapEpoch:  epoch,
+		Checkpoint: protocol.ToProtoMapCheckpoint(checkpoint),
 	}
 	_, err := c.client.Promote(context.Background(), req)
 	return err

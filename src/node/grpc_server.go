@@ -2,11 +2,15 @@ package node
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"battleworld/pb"
 	"battleworld/protocol"
 	"battleworld/world"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // NodeGRPCServer 是 gRPC 服务的具体实现，它包装了本地的 NodeService，对接网络请求。
@@ -25,17 +29,17 @@ func (s *NodeGRPCServer) Ping(ctx context.Context, req *pb.PingReq) (*pb.PingRes
 
 func (s *NodeGRPCServer) AddPlayer(ctx context.Context, req *pb.AddPlayerReq) (*pb.AddPlayerResp, error) {
 	profile := protocol.FromProtoUserProfile(req.Profile)
-	err := s.svc.AddPlayer(ctx, req.MapId, &profile)
+	err := s.svc.AddPlayer(ctx, req.MapId, req.MapEpoch, &profile)
 	if err != nil {
-		return nil, err
+		return nil, grpcAuthorityError(err)
 	}
 	return &pb.AddPlayerResp{Ok: true}, nil
 }
 
 func (s *NodeGRPCServer) RemovePlayer(ctx context.Context, req *pb.RemovePlayerReq) (*pb.RemovePlayerResp, error) {
-	profile, ok, err := s.svc.RemovePlayer(ctx, req.MapId, req.Username)
+	profile, ok, err := s.svc.RemovePlayer(ctx, req.MapId, req.Username, req.MapEpoch)
 	if err != nil {
-		return nil, err
+		return nil, grpcAuthorityError(err)
 	}
 	return &pb.RemovePlayerResp{
 		Profile: protocol.ToProtoUserProfile(profile),
@@ -44,9 +48,9 @@ func (s *NodeGRPCServer) RemovePlayer(ctx context.Context, req *pb.RemovePlayerR
 }
 
 func (s *NodeGRPCServer) MovePlayer(ctx context.Context, req *pb.MovePlayerReq) (*pb.MovePlayerResp, error) {
-	text, profile, ok, err := s.svc.MovePlayer(ctx, req.MapId, req.Username, req.Dir)
+	text, profile, ok, err := s.svc.MovePlayer(ctx, req.MapId, req.Username, req.Dir, req.MapEpoch)
 	if err != nil {
-		return nil, err
+		return nil, grpcAuthorityError(err)
 	}
 	return &pb.MovePlayerResp{
 		Text:    text,
@@ -56,9 +60,9 @@ func (s *NodeGRPCServer) MovePlayer(ctx context.Context, req *pb.MovePlayerReq) 
 }
 
 func (s *NodeGRPCServer) Attack(ctx context.Context, req *pb.AttackReq) (*pb.AttackResp, error) {
-	log1, log2, log3, profile, ok, err := s.svc.Attack(ctx, req.MapId, req.Username)
+	log1, log2, log3, profile, ok, err := s.svc.Attack(ctx, req.MapId, req.Username, req.MapEpoch)
 	if err != nil {
-		return nil, err
+		return nil, grpcAuthorityError(err)
 	}
 	return &pb.AttackResp{
 		Log:     log1,
@@ -70,9 +74,9 @@ func (s *NodeGRPCServer) Attack(ctx context.Context, req *pb.AttackReq) (*pb.Att
 }
 
 func (s *NodeGRPCServer) Heal(ctx context.Context, req *pb.HealReq) (*pb.HealResp, error) {
-	text, profile, ok, err := s.svc.Heal(ctx, req.MapId, req.Username)
+	text, profile, ok, err := s.svc.Heal(ctx, req.MapId, req.Username, req.MapEpoch)
 	if err != nil {
-		return nil, err
+		return nil, grpcAuthorityError(err)
 	}
 	return &pb.HealResp{
 		Text:    text,
@@ -82,9 +86,9 @@ func (s *NodeGRPCServer) Heal(ctx context.Context, req *pb.HealReq) (*pb.HealRes
 }
 
 func (s *NodeGRPCServer) BuyItem(ctx context.Context, req *pb.BuyItemReq) (*pb.BuyItemResp, error) {
-	text, profile, ok, err := s.svc.BuyItem(ctx, req.MapId, req.Username, req.Item)
+	text, profile, ok, err := s.svc.BuyItem(ctx, req.MapId, req.Username, req.Item, req.MapEpoch)
 	if err != nil {
-		return nil, err
+		return nil, grpcAuthorityError(err)
 	}
 	return &pb.BuyItemResp{
 		Text:    text,
@@ -94,9 +98,9 @@ func (s *NodeGRPCServer) BuyItem(ctx context.Context, req *pb.BuyItemReq) (*pb.B
 }
 
 func (s *NodeGRPCServer) AttackBoss(ctx context.Context, req *pb.AttackBossReq) (*pb.AttackBossResp, error) {
-	text, profile, ok, err := s.svc.AttackBoss(ctx, req.MapId, req.Username)
+	text, profile, ok, err := s.svc.AttackBoss(ctx, req.MapId, req.Username, req.MapEpoch)
 	if err != nil {
-		return nil, err
+		return nil, grpcAuthorityError(err)
 	}
 	return &pb.AttackBossResp{
 		Text:    text,
@@ -117,9 +121,9 @@ func (s *NodeGRPCServer) Profile(ctx context.Context, req *pb.ProfileReq) (*pb.P
 }
 
 func (s *NodeGRPCServer) RewardPlayer(ctx context.Context, req *pb.RewardPlayerReq) (*pb.RewardPlayerResp, error) {
-	profile, ok, err := s.svc.RewardPlayer(ctx, req.MapId, req.Username, int(req.TreasureDelta), int(req.VictoryDelta))
+	profile, ok, err := s.svc.RewardPlayer(ctx, req.MapId, req.Username, int(req.TreasureDelta), int(req.VictoryDelta), req.MapEpoch)
 	if err != nil {
-		return nil, err
+		return nil, grpcAuthorityError(err)
 	}
 	return &pb.RewardPlayerResp{
 		Profile: protocol.ToProtoUserProfile(profile),
@@ -162,17 +166,11 @@ func (s *NodeGRPCServer) Checkpoint(ctx context.Context, req *pb.CheckpointReq) 
 }
 
 func (s *NodeGRPCServer) BackgroundStep(ctx context.Context, req *pb.BackgroundStepReq) (*pb.BackgroundStepResp, error) {
-	events := s.svc.BackgroundStep()
-	resp := make([]*pb.MapEvents, 0, len(events))
-	for _, e := range events {
-		resp = append(resp, &pb.MapEvents{
-			MapId:  e.MapID,
-			Events: e.Events,
-		})
+	events, err := s.svc.BackgroundStep(req.MapId, req.MapEpoch)
+	if err != nil {
+		return nil, grpcAuthorityError(err)
 	}
-	return &pb.BackgroundStepResp{
-		Events: resp,
-	}, nil
+	return &pb.BackgroundStepResp{Events: []*pb.MapEvents{{MapId: req.MapId, Events: events}}}, nil
 }
 
 func (s *NodeGRPCServer) StoreReplica(ctx context.Context, req *pb.StoreReplicaReq) (*pb.StoreReplicaResp, error) {
@@ -190,11 +188,20 @@ func (s *NodeGRPCServer) Promote(ctx context.Context, req *pb.PromoteReq) (*pb.P
 			break
 		}
 	}
-	err := s.svc.Promote(req.MapId, cfg)
+	err := s.svc.Promote(req.MapId, cfg, protocol.FromProtoMapCheckpoint(req.Checkpoint), req.MapEpoch)
 	if err != nil {
-		return nil, err
+		return nil, grpcAuthorityError(err)
 	}
 	return &pb.PromoteResp{Ok: true}, nil
+}
+
+// grpcAuthorityError 将 owner/epoch 不匹配统一转换为明确的 FailedPrecondition，调用者
+// 可据此重新加载 Topology，而不是把 fencing 错误误判为业务拒绝。
+func grpcAuthorityError(err error) error {
+	if errors.Is(err, ErrTopologyAuthorityUnavailable) || errors.Is(err, ErrMapAuthorityDenied) || errors.Is(err, ErrMapPromotionDenied) {
+		return status.Error(codes.FailedPrecondition, err.Error())
+	}
+	return err
 }
 
 func (s *NodeGRPCServer) View(ctx context.Context, req *pb.ViewReq) (*pb.ViewResp, error) {

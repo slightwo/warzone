@@ -38,17 +38,21 @@ func (c *Coordinator) heartbeatOnce() {
 
 func (c *Coordinator) setNodeHealth(nodeID string, healthy bool) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	connection, ok := c.nodes[nodeID]
 	if !ok || connection.healthy == healthy {
+		c.mu.Unlock()
 		return
 	}
 	connection.healthy = healthy
 	c.nodes[nodeID] = connection
+	c.mu.Unlock()
+
 	if healthy {
 		log.Printf("[coordinator/heartbeat] 节点 %s 已恢复健康", nodeID)
 		return
 	}
-	// 2.2-B 只完成故障探测；带 MapEpoch 的副本提升和拓扑 CAS 在 2.2-C 实现。
-	log.Printf("[coordinator/heartbeat] 节点 %s 不健康，当前拓扑保持不变", nodeID)
+	log.Printf("[coordinator/heartbeat] 节点 %s 不健康，开始评估带 MapEpoch 的副本提升", nodeID)
+	// 绝不能持有 c.mu 调用 Promote 或 Redis CAS；这些操作可回调/阻塞，且 failoverMap
+	// 会重新读取最新 topology，确保只切换仍由该失效节点拥有的地图。
+	go c.failoverNode(nodeID)
 }

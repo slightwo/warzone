@@ -180,15 +180,16 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 		mapID = world.DefaultMapID()
 	}
 	ownerID := c.owners[mapID]
+	epoch := c.topology.MapEpochs[mapID]
 	owner := c.nodes[ownerID]
 	topologyLoaded := c.topologyLoaded
 	c.mu.Unlock()
 
-	if !topologyLoaded || ownerID == "" || owner == nil {
+	if !topologyLoaded || ownerID == "" || epoch == 0 || owner == nil {
 		return nil, errors.New("路由尚未就绪，请等待 coordinator 提交拓扑")
 	}
 
-	if err := owner.AddPlayer(context.Background(), mapID, profile); err != nil {
+	if err := owner.AddPlayer(context.Background(), mapID, epoch, profile); err != nil {
 		return nil, fmt.Errorf("节点添加玩家失败: %v", err)
 	}
 
@@ -209,41 +210,40 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 }
 
 func (c *Cluster) Logout(username string) error {
-	c.mu.Lock()
 	session, ok := c.store.LoadGlobalSession(username)
 	if !ok {
-		c.mu.Unlock()
 		return nil
 	}
-	_ = c.store.DeleteGlobalSession(username)
-	c.localSessions.Delete(username) // 同理，也删除本地缓存
-	c.mu.Unlock()
 
 	c.mu.RLock()
-	node := c.nodes[session.NodeID]
+	ownerID := c.owners[session.MapID]
+	epoch := c.topology.MapEpochs[session.MapID]
+	node := c.nodes[ownerID]
+	topologyLoaded := c.topologyLoaded
 	c.mu.RUnlock()
-	if node == nil {
-		return c.store.DeleteHotSession(username)
+	if topologyLoaded && ownerID != "" && epoch != 0 && node != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		profile, removed, err := node.RemovePlayer(ctx, session.MapID, username, epoch)
+		cancel()
+		if err != nil {
+			log.Printf("[logout] 节点 %s 移除玩家 %s 失败: %v", ownerID, username, err)
+		} else if removed {
+			profile.LastNode = ownerID
+			profile.LastMap = session.MapID
+			_ = c.store.SaveProfile(profile)
+		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	profile, removed, err := node.RemovePlayer(ctx, session.MapID, username)
-	if err != nil {
-		log.Printf("[logout] 节点 %s 移除玩家 %s 失败: %v", session.NodeID, username, err)
-	} else if removed {
-		profile.LastNode = session.NodeID
-		profile.LastMap = session.MapID
-		_ = c.store.SaveProfile(profile)
-	}
+	_ = c.store.DeleteGlobalSession(username)
+	c.localSessions.Delete(username)
 	return c.store.DeleteHotSession(username)
 }
 
 func (c *Cluster) Move(username, dir string) (*protocol.WorldState, error) {
-	session, node, err := c.sessionNode(username)
+	session, node, epoch, err := c.sessionNode(username)
 	if err != nil {
 		return nil, err
 	}
-	_, _, ok, err := node.MovePlayer(context.Background(), session.MapID, username, dir)
+	_, _, ok, err := node.MovePlayer(context.Background(), session.MapID, username, dir, epoch)
 	if err != nil {
 		return nil, fmt.Errorf("节点RPC移动调用失败: %v", err)
 	}
@@ -259,11 +259,11 @@ func (c *Cluster) Move(username, dir string) (*protocol.WorldState, error) {
 }
 
 func (c *Cluster) Attack(username string) (*protocol.WorldState, error) {
-	session, node, err := c.sessionNode(username)
+	session, node, epoch, err := c.sessionNode(username)
 	if err != nil {
 		return nil, err
 	}
-	event, targetUsername, targetEvent, _, ok, err := node.Attack(context.Background(), session.MapID, username)
+	event, targetUsername, targetEvent, _, ok, err := node.Attack(context.Background(), session.MapID, username, epoch)
 	if err != nil {
 		return nil, fmt.Errorf("节点RPC攻击调用异常: %v", err)
 	}
@@ -283,11 +283,11 @@ func (c *Cluster) Attack(username string) (*protocol.WorldState, error) {
 }
 
 func (c *Cluster) Heal(username string) (*protocol.WorldState, error) {
-	session, node, err := c.sessionNode(username)
+	session, node, epoch, err := c.sessionNode(username)
 	if err != nil {
 		return nil, err
 	}
-	event, _, ok, err := node.Heal(context.Background(), session.MapID, username)
+	event, _, ok, err := node.Heal(context.Background(), session.MapID, username, epoch)
 	if err != nil {
 		return nil, fmt.Errorf("节点RPC治疗调用异常: %v", err)
 	}
@@ -303,11 +303,11 @@ func (c *Cluster) Heal(username string) (*protocol.WorldState, error) {
 }
 
 func (c *Cluster) BuyItem(username, item string) (*protocol.WorldState, error) {
-	session, node, err := c.sessionNode(username)
+	session, node, epoch, err := c.sessionNode(username)
 	if err != nil {
 		return nil, err
 	}
-	event, profile, ok, err := node.BuyItem(context.Background(), session.MapID, username, item)
+	event, profile, ok, err := node.BuyItem(context.Background(), session.MapID, username, item, epoch)
 	if err != nil {
 		return nil, fmt.Errorf("节点RPC商店请求异常: %v", err)
 	}
@@ -322,11 +322,11 @@ func (c *Cluster) BuyItem(username, item string) (*protocol.WorldState, error) {
 	return c.SnapshotFor(username)
 }
 func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
-	session, node, err := c.sessionNode(username)
+	session, node, epoch, err := c.sessionNode(username)
 	if err != nil {
 		return nil, err
 	}
-	event, _, ok, err := node.AttackBoss(context.Background(), session.MapID, username)
+	event, _, ok, err := node.AttackBoss(context.Background(), session.MapID, username, epoch)
 	if err != nil || !ok {
 		return nil, err
 	}
@@ -336,12 +336,12 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 }
 
 func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, error) {
-	session, src_node, err := c.sessionNode(username)
+	session, srcNode, srcEpoch, err := c.sessionNode(username)
 	if err != nil {
 		return nil, err
 	}
 	c.mu.RLock()
-	profile, ok, err := src_node.Profile(context.Background(), session.MapID, username)
+	profile, ok, err := srcNode.Profile(context.Background(), session.MapID, username)
 	if err != nil {
 		c.mu.RUnlock()
 		return nil, fmt.Errorf("节点RPC获取Profile异常: %v", err)
@@ -355,14 +355,15 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 		return nil, errors.New("倒地时不可切换地图")
 	}
 	dstNodeID := c.owners[targetMap]
+	dstEpoch := c.topology.MapEpochs[targetMap]
 	dst := c.nodes[dstNodeID]
 	topologyLoaded := c.topologyLoaded
 	c.mu.RUnlock()
-	if !topologyLoaded || dstNodeID == "" || dst == nil {
+	if !topologyLoaded || dstNodeID == "" || dstEpoch == 0 || dst == nil {
 		return nil, fmt.Errorf("目标地图 %q 路由尚未就绪，请等待 coordinator 提交拓扑", targetMap)
 	}
 
-	profile, ok, err = src_node.RemovePlayer(context.Background(), session.MapID, username)
+	profile, ok, err = srcNode.RemovePlayer(context.Background(), session.MapID, username, srcEpoch)
 	if err != nil {
 		return nil, fmt.Errorf("源节点RPC移除玩家异常 (Try失败): %v", err)
 	}
@@ -372,11 +373,11 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 
 	// 执行 TCC 逻辑的 Confirm / Cancel 阶段
 	// 尝试向目标节点写入 (Confirm)
-	if err := dst.AddPlayer(context.Background(), targetMap, &profile); err != nil {
+	if err := dst.AddPlayer(context.Background(), targetMap, dstEpoch, &profile); err != nil {
 		// Cancel 阶段: 目标写入失败，必须进行业务回滚，将玩家恢复至原源节点
 		fmt.Printf("[!!!严重警告!!!] 玩家 %s 切换地图 %s 在目标节点写入失败 (%v)，开始执行 TCC 回滚...\n", username, targetMap, err)
 
-		rollbackErr := src_node.AddPlayer(context.Background(), session.MapID, &profile)
+		rollbackErr := srcNode.AddPlayer(context.Background(), session.MapID, srcEpoch, &profile)
 		if rollbackErr != nil {
 			// 如果回滚也失败了，说明遇到了罕见的网络断裂或极端的双主脑裂，玩家数据暂时丢失在以太空间，需要后续的人工或后台守护进程修复
 			fmt.Printf("[FATAL 灾难] 玩家 %s TCC 回滚失败 ! 补偿写入原节点也失败了 : %v\n", username, rollbackErr)
@@ -416,7 +417,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 }
 
 func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
-	session, node, err := c.sessionNode(username)
+	session, node, _, err := c.sessionNode(username)
 	if err != nil {
 		return nil, err
 	}
@@ -522,40 +523,33 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	return ws, nil
 }
 
-func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, GatewayNodeClient, error) {
-	// 1. 优先从本地内存获取无锁化读取
-	if val, ok := c.localSessions.Load(username); ok {
-		session := val.(*storage.GlobalSession)
-
-		c.mu.RLock()
-		node := c.nodes[session.NodeID]
-		c.mu.RUnlock()
-		if node == nil {
-			return nil, nil, fmt.Errorf("节点 %q 当前不可用", session.NodeID)
+// sessionNode 从同一份已提交 Topology 读取当前 map owner 与 epoch。会话中的 NodeID
+// 仅是持久化定位信息；写入路由永远以最新 Topology 为准，避免 failover 后继续向旧主发送。
+func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, GatewayNodeClient, uint64, error) {
+	var session *storage.GlobalSession
+	if cached, ok := c.localSessions.Load(username); ok {
+		session = cached.(*storage.GlobalSession)
+	} else {
+		loaded, found := c.store.LoadGlobalSession(username)
+		if !found {
+			return nil, nil, 0, fmt.Errorf("用户 %q 当前不在线", username)
 		}
-
-		copySession := *session
-		return &copySession, node, nil
+		session = loaded
+		c.localSessions.Store(username, loaded)
 	}
 
-	// 2. 本地没找到，进行降级读取并做缓存回填（带读锁不阻碍本节点的操作或可先解锁）
-	// 这里为了简单，维持原有的 c.mu.RLock 控制即可
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	session, ok := c.store.LoadGlobalSession(username)
-	if !ok {
-		return nil, nil, fmt.Errorf("用户 %q 当前不在线", username)
-	}
-
-	c.localSessions.Store(username, session)
-
-	node := c.nodes[session.NodeID]
-	if node == nil {
-		return nil, nil, fmt.Errorf("节点 %q 当前不可用", session.NodeID)
+	ownerID := c.owners[session.MapID]
+	epoch := c.topology.MapEpochs[session.MapID]
+	node := c.nodes[ownerID]
+	topologyLoaded := c.topologyLoaded
+	c.mu.RUnlock()
+	if !topologyLoaded || ownerID == "" || epoch == 0 || node == nil {
+		return nil, nil, 0, fmt.Errorf("地图 %q 当前路由不可用", session.MapID)
 	}
 	copySession := *session
-	return &copySession, node, nil
+	copySession.NodeID = ownerID
+	return &copySession, node, epoch, nil
 }
 
 func (c *Cluster) pushEvent(username, event string) {
@@ -598,6 +592,7 @@ func (c *Cluster) mapCacheLoop() {
 			for k, v := range c.owners {
 				owners[k] = v
 			}
+			topologyVersion := c.topology.Version
 			nodes := make(map[string]gatewayNodeClient)
 			for k, v := range c.nodes {
 				nodes[k] = v
@@ -665,6 +660,14 @@ func (c *Cluster) mapCacheLoop() {
 			}
 			wg.Wait()
 
+			// 只允许仍对应当前 topology 的快照回填缓存。旧 owner 的慢 Snapshot 在
+			// failover 后返回时会被丢弃，不能覆盖已清空的新路由缓存。
+			c.mu.RLock()
+			versionCurrent := c.topologyLoaded && c.topology.Version == topologyVersion
+			c.mu.RUnlock()
+			if !versionCurrent {
+				continue
+			}
 			c.mapCacheMu.Lock()
 			for k, v := range newCache {
 				c.mapCache[k] = v

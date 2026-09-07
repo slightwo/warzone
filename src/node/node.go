@@ -15,11 +15,17 @@ import (
 	"battleworld/world"
 )
 
+const (
+	topologyRefreshInterval = 500 * time.Millisecond
+	topologyAuthorityGrace  = 2 * time.Second
+)
+
 type NodeService struct {
 	mu               sync.RWMutex
 	ID               string
 	Addr             string
 	store            *storage.Store
+	authority        *authorityCache
 	healthy          bool
 	lastHeartbeat    time.Time
 	maps             map[string]*world.World
@@ -34,6 +40,7 @@ func NewNodeService(id, addr string, store *storage.Store) *NodeService {
 		ID:               id,
 		Addr:             addr,
 		store:            store,
+		authority:        newAuthorityCache(id, topologyAuthorityGrace),
 		healthy:          true,
 		lastHeartbeat:    time.Now(),
 		maps:             make(map[string]*world.World),
@@ -46,7 +53,7 @@ func NewNodeService(id, addr string, store *storage.Store) *NodeService {
 func (n *NodeService) Start() error {
 	n.mu.Lock()
 	if n.ln != nil {
-		n.mu.RUnlock()
+		n.mu.Unlock()
 		return nil
 	}
 
@@ -59,6 +66,7 @@ func (n *NodeService) Start() error {
 	}
 	n.mu.Unlock()
 
+	go n.topologyRefreshLoop()
 	go n.flushLoop()
 	go n.tickLoop()
 	go n.replicaSyncLoop()
@@ -79,6 +87,57 @@ func (n *NodeService) Stop() error {
 	return nil
 }
 
+// topologyRefreshLoop 持续拉取已提交 Topology。刷新失败时 authorityCache 只会在
+// 有限宽限期内使用最后快照；宽限期到期后节点必须 fail-closed。
+func (n *NodeService) topologyRefreshLoop() {
+	ticker := time.NewTicker(topologyRefreshInterval)
+	defer ticker.Stop()
+
+	for {
+		if err := n.refreshTopology(); err != nil {
+			log.Printf("[node/authority] 节点 %s 刷新拓扑失败: %v", n.ID, err)
+		}
+		select {
+		case <-ticker.C:
+		case <-n.stopCh:
+			return
+		}
+	}
+}
+
+func (n *NodeService) refreshTopology() error {
+	if n.store == nil {
+		return ErrTopologyAuthorityUnavailable
+	}
+	return n.authority.refresh(n.store)
+}
+
+// RequireAuthority 在所有地图状态写入进入 world 前执行 owner/epoch fencing。
+func (n *NodeService) RequireAuthority(mapID string, epoch uint64) error {
+	if n.authority == nil {
+		return ErrTopologyAuthorityUnavailable
+	}
+	if err := n.authority.Require(mapID, epoch); err != nil {
+		return err
+	}
+	// 本地缓存只负责快速确定候选主权；真正允许 world 变更前必须再次读取 Redis
+	// fence。控制面 CAS 一旦切换 owner/epoch，旧主的下一次写入立即被拒绝。
+	if n.store == nil {
+		return ErrTopologyAuthorityUnavailable
+	}
+	if err := n.store.RequireMapFence(mapID, n.ID, epoch); err != nil {
+		return fmt.Errorf("%w: %v", ErrMapAuthorityDenied, err)
+	}
+	return nil
+}
+
+func (n *NodeService) RequirePromotionCandidate(mapID string, targetEpoch uint64) error {
+	if n.authority == nil {
+		return ErrTopologyAuthorityUnavailable
+	}
+	return n.authority.RequirePromotionCandidate(mapID, targetEpoch)
+}
+
 func (n *NodeService) flushLoop() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
@@ -94,8 +153,11 @@ func (n *NodeService) flushLoop() {
 			lastFlush = now
 
 			n.mu.RLock()
-			// 收集所有在线热数据
+			// 仅当前 owner 可下沉在线热数据；旧 owner 超过主权宽限期后完全停止写入。
 			for mapID, instance := range n.maps {
+				if _, owned := n.authority.Current(mapID); !owned {
+					continue
+				}
 				profiles := instance.FlushProfiles(since)
 				for _, profile := range profiles {
 					hotData := protocol.HotSession{
@@ -156,16 +218,26 @@ func (n *NodeService) tickLoop() {
 			n.mu.RUnlock()
 
 			for mapID, instance := range instances {
-				// 1. 世界模拟，事件直发 Redis（不再回传协调器）
-				for _, event := range instance.BackgroundStep() {
+				authority, owned := n.authority.Current(mapID)
+				if !owned || n.RequireAuthority(mapID, authority.Epoch) != nil {
+					continue
+				}
+				// 1. world 变更前已即时校验 Redis fence；fence 失效则不会产生事件。
+				events := instance.BackgroundStep()
+				// 2. CAS 可能与 BackgroundStep 并发完成，因此发布事件和 checkpoint 前再次
+				// 校验。失败时不发布刚才产生的本地事件，并让下一轮重新从新 owner 读取。
+				if n.RequireAuthority(mapID, authority.Epoch) != nil {
+					continue
+				}
+				for _, event := range events {
 					if err := n.store.PublishEvent("events:map:"+mapID, event); err != nil {
 						log.Printf("[tick] 发布地图 %s 事件失败: %v", mapID, err)
 					}
 				}
-				// 2. 自落盘 checkpoint（对称 1.1 的自拉恢复）
 				cp := instance.CaptureCheckpoint(n.ID)
-				if err := n.store.SaveCheckpoint(cp); err != nil {
-					log.Printf("[tick] 保存地图 %s 快照失败: %v", mapID, err)
+				cp.MapEpoch = authority.Epoch
+				if err := n.store.SaveCheckpointIfOwner(cp, n.ID, authority.Epoch); err != nil {
+					log.Printf("[tick] 保存地图 %s 的 fenced 快照失败: %v", mapID, err)
 				}
 			}
 		case <-n.stopCh:
@@ -228,7 +300,10 @@ func (n *NodeService) RestorePrimaryMap(cfg world.MapConfig, cp protocol.MapChec
 	instance.RestoreCheckpoint(cp)
 }
 
-func (n *NodeService) AddPlayer(ctx context.Context, mapID string, profile *protocol.UserProfile) error {
+func (n *NodeService) AddPlayer(ctx context.Context, mapID string, epoch uint64, profile *protocol.UserProfile) error {
+	if err := n.RequireAuthority(mapID, epoch); err != nil {
+		return err
+	}
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -239,7 +314,10 @@ func (n *NodeService) AddPlayer(ctx context.Context, mapID string, profile *prot
 	return nil
 }
 
-func (n *NodeService) RemovePlayer(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error) {
+func (n *NodeService) RemovePlayer(ctx context.Context, mapID, username string, epoch uint64) (protocol.UserProfile, bool, error) {
+	if err := n.RequireAuthority(mapID, epoch); err != nil {
+		return protocol.UserProfile{}, false, err
+	}
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -250,7 +328,10 @@ func (n *NodeService) RemovePlayer(ctx context.Context, mapID, username string) 
 	return profile, ok, nil
 }
 
-func (n *NodeService) MovePlayer(ctx context.Context, mapID, username, dir string) (string, protocol.UserProfile, bool, error) {
+func (n *NodeService) MovePlayer(ctx context.Context, mapID, username, dir string, epoch uint64) (string, protocol.UserProfile, bool, error) {
+	if err := n.RequireAuthority(mapID, epoch); err != nil {
+		return "", protocol.UserProfile{}, false, err
+	}
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -261,7 +342,10 @@ func (n *NodeService) MovePlayer(ctx context.Context, mapID, username, dir strin
 	return text, profile, ok, nil
 }
 
-func (n *NodeService) Attack(ctx context.Context, mapID, username string) (string, string, string, protocol.UserProfile, bool, error) {
+func (n *NodeService) Attack(ctx context.Context, mapID, username string, epoch uint64) (string, string, string, protocol.UserProfile, bool, error) {
+	if err := n.RequireAuthority(mapID, epoch); err != nil {
+		return "", "", "", protocol.UserProfile{}, false, err
+	}
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -272,7 +356,10 @@ func (n *NodeService) Attack(ctx context.Context, mapID, username string) (strin
 	return log1, log2, gmLog, profile, ok, nil
 }
 
-func (n *NodeService) Heal(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error) {
+func (n *NodeService) Heal(ctx context.Context, mapID, username string, epoch uint64) (string, protocol.UserProfile, bool, error) {
+	if err := n.RequireAuthority(mapID, epoch); err != nil {
+		return "", protocol.UserProfile{}, false, err
+	}
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -283,7 +370,10 @@ func (n *NodeService) Heal(ctx context.Context, mapID, username string) (string,
 	return text, profile, ok, nil
 }
 
-func (n *NodeService) BuyItem(ctx context.Context, mapID, username, item string) (string, protocol.UserProfile, bool, error) {
+func (n *NodeService) BuyItem(ctx context.Context, mapID, username, item string, epoch uint64) (string, protocol.UserProfile, bool, error) {
+	if err := n.RequireAuthority(mapID, epoch); err != nil {
+		return "", protocol.UserProfile{}, false, err
+	}
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -305,7 +395,10 @@ func (n *NodeService) Profile(ctx context.Context, mapID, username string) (prot
 	return profile, ok, nil
 }
 
-func (n *NodeService) RewardPlayer(ctx context.Context, mapID, username string, treasureDelta, victoryDelta int) (protocol.UserProfile, bool, error) {
+func (n *NodeService) RewardPlayer(ctx context.Context, mapID, username string, treasureDelta, victoryDelta int, epoch uint64) (protocol.UserProfile, bool, error) {
+	if err := n.RequireAuthority(mapID, epoch); err != nil {
+		return protocol.UserProfile{}, false, err
+	}
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -328,7 +421,10 @@ func manhattan(ax, ay, bx, by int) int {
 	return dx + dy
 }
 
-func (n *NodeService) AttackBoss(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error) {
+func (n *NodeService) AttackBoss(ctx context.Context, mapID, username string, epoch uint64) (string, protocol.UserProfile, bool, error) {
+	if err := n.RequireAuthority(mapID, epoch); err != nil {
+		return "", protocol.UserProfile{}, false, err
+	}
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -421,31 +517,24 @@ func (n *NodeService) Checkpoint(ctx context.Context, mapID string) (protocol.Ma
 	if instance == nil {
 		return protocol.MapCheckpoint{}, fmt.Errorf("地图 %q 当前不在节点 %s 上", mapID, n.ID)
 	}
-	return instance.CaptureCheckpoint(n.ID), nil
+	checkpoint := instance.CaptureCheckpoint(n.ID)
+	if authority, owned := n.authority.Current(mapID); owned {
+		checkpoint.MapEpoch = authority.Epoch
+	}
+	return checkpoint, nil
 }
 
-func (n *NodeService) BackgroundStep() []protocol.MapEvents {
+func (n *NodeService) BackgroundStep(mapID string, epoch uint64) ([]string, error) {
+	if err := n.RequireAuthority(mapID, epoch); err != nil {
+		return nil, err
+	}
 	n.mu.RLock()
-	mapIDs := make([]string, 0, len(n.maps))
-	for mapID := range n.maps {
-		mapIDs = append(mapIDs, mapID)
-	}
-	sort.Strings(mapIDs)
-	instances := make([]*world.World, 0, len(mapIDs))
-	for _, mapID := range mapIDs {
-		instances = append(instances, n.maps[mapID])
-	}
+	instance := n.maps[mapID]
 	n.mu.RUnlock()
-
-	results := make([]protocol.MapEvents, 0, len(instances))
-	for i, instance := range instances {
-		events := instance.BackgroundStep()
-		if len(events) == 0 {
-			continue
-		}
-		results = append(results, protocol.MapEvents{MapID: mapIDs[i], Events: events})
+	if instance == nil {
+		return nil, fmt.Errorf("地图 %q 当前不在节点 %s 上", mapID, n.ID)
 	}
-	return results
+	return instance.BackgroundStep(), nil
 }
 
 func (n *NodeService) StoreReplica(cp protocol.MapCheckpoint) {
@@ -454,18 +543,22 @@ func (n *NodeService) StoreReplica(cp protocol.MapCheckpoint) {
 	n.replicaSnapshots[cp.MapID] = cp
 }
 
-func (n *NodeService) Promote(mapID string, cfg world.MapConfig) error {
+func (n *NodeService) Promote(mapID string, cfg world.MapConfig, checkpoint protocol.MapCheckpoint, targetEpoch uint64) error {
+	if err := n.RequirePromotionCandidate(mapID, targetEpoch); err != nil {
+		return err
+	}
+	if checkpoint.MapID != mapID || checkpoint.NodeID == "" || checkpoint.Version <= 0 || checkpoint.MapEpoch != targetEpoch-1 {
+		return fmt.Errorf("地图 %q 的提升 checkpoint 无效: %+v", mapID, checkpoint)
+	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	cp, ok := n.replicaSnapshots[mapID]
-	if !ok {
-		return fmt.Errorf("节点 %s 上没有地图 %q 的副本快照", n.ID, mapID)
-	}
+	// coordinator 已在 Promote 前验证该 checkpoint 的 owner/epoch/version；节点必须
+	// 使用该精确快照恢复，禁止悄然回退到可能滞后的 replicaSnapshots。
 	instance := world.NewWorld(cfg)
-	instance.RestoreCheckpoint(cp)
+	instance.RestoreCheckpoint(checkpoint)
 	n.maps[mapID] = instance
-	delete(n.replicaSnapshots, mapID)
+	n.replicaSnapshots[mapID] = checkpoint
 	return nil
 }
 

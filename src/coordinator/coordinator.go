@@ -24,6 +24,8 @@ type ControlStore interface {
 	GetActiveNodes() ([]storage.NodeRegistryInfo, error)
 	LoadTopology() (*storage.Topology, bool, error)
 	CompareAndSaveTopology(uint64, storage.Topology) error
+	CompareAndSaveTopologyAndMigrateSessions(uint64, storage.Topology, string, string, string) error
+	LoadCheckpoint(string) (*protocol.MapCheckpoint, bool)
 	PublishTopologyChanged(uint64) error
 	LoadGlobalBoss() (protocol.BossState, int32, error)
 	InitGlobalBoss(int32, protocol.BossState) error
@@ -44,9 +46,11 @@ type Coordinator struct {
 	mu              sync.RWMutex
 	store           ControlStore
 	configs         map[string]world.MapConfig
-	nodes           map[string]nodeConnection
-	connectingNodes map[string]struct{}
-	newNodeClient   NodeClientFactory
+	nodes                 map[string]nodeConnection
+	connectingNodes       map[string]struct{}
+	failureGenerations    map[string]uint64
+	failoverInFlight      map[string]bool
+	newNodeClient         NodeClientFactory
 	stopCh          chan struct{}
 	closeOnce       sync.Once
 	startMu         sync.Mutex
@@ -79,9 +83,11 @@ func newCoordinator(store ControlStore, newNodeClient NodeClientFactory, configs
 	return &Coordinator{
 		store:             store,
 		configs:           configByID,
-		nodes:             make(map[string]nodeConnection),
-		connectingNodes:   make(map[string]struct{}),
-		newNodeClient:     newNodeClient,
+		nodes:              make(map[string]nodeConnection),
+		connectingNodes:    make(map[string]struct{}),
+		failureGenerations: make(map[string]uint64),
+		failoverInFlight:   make(map[string]bool),
+		newNodeClient:      newNodeClient,
 		stopCh:            make(chan struct{}),
 		discoveryInterval: defaultDiscoveryInterval,
 		heartbeatInterval: defaultHeartbeatInterval,
@@ -135,6 +141,8 @@ func (c *Coordinator) Close() {
 		}
 		c.nodes = make(map[string]nodeConnection)
 		c.connectingNodes = make(map[string]struct{})
+		c.failureGenerations = make(map[string]uint64)
+		c.failoverInFlight = make(map[string]bool)
 		c.mu.Unlock()
 
 		for _, client := range clients {

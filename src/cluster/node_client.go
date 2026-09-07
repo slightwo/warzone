@@ -12,15 +12,15 @@ import (
 // 健康探测或拓扑控制。
 type GatewayNodeClient interface {
 	NodeID() string
-	AddPlayer(context.Context, string, *protocol.UserProfile) error
-	RemovePlayer(context.Context, string, string) (protocol.UserProfile, bool, error)
-	MovePlayer(context.Context, string, string, string) (string, protocol.UserProfile, bool, error)
-	Attack(context.Context, string, string) (string, string, string, protocol.UserProfile, bool, error)
-	Heal(context.Context, string, string) (string, protocol.UserProfile, bool, error)
-	BuyItem(context.Context, string, string, string) (string, protocol.UserProfile, bool, error)
-	AttackBoss(context.Context, string, string) (string, protocol.UserProfile, bool, error)
+	AddPlayer(context.Context, string, uint64, *protocol.UserProfile) error
+	RemovePlayer(context.Context, string, string, uint64) (protocol.UserProfile, bool, error)
+	MovePlayer(context.Context, string, string, string, uint64) (string, protocol.UserProfile, bool, error)
+	Attack(context.Context, string, string, uint64) (string, string, string, protocol.UserProfile, bool, error)
+	Heal(context.Context, string, string, uint64) (string, protocol.UserProfile, bool, error)
+	BuyItem(context.Context, string, string, string, uint64) (string, protocol.UserProfile, bool, error)
+	AttackBoss(context.Context, string, string, uint64) (string, protocol.UserProfile, bool, error)
 	Profile(context.Context, string, string) (protocol.UserProfile, bool, error)
-	RewardPlayer(context.Context, string, string, int, int) (protocol.UserProfile, bool, error)
+	RewardPlayer(context.Context, string, string, int, int, uint64) (protocol.UserProfile, bool, error)
 	Snapshot(context.Context, string) (protocol.MapView, error)
 }
 
@@ -31,7 +31,7 @@ type CoordinatorNodeClient interface {
 	Ping(context.Context) error
 	View() protocol.NodeView
 	Checkpoint(context.Context, string) (protocol.MapCheckpoint, error)
-	Promote(string, world.MapConfig) error
+	Promote(string, world.MapConfig, protocol.MapCheckpoint, uint64) error
 	Close() error
 }
 
