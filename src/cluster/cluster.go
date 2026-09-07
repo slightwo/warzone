@@ -25,30 +25,6 @@ type Session struct {
 	Version  int64
 }
 
-// NodeClient 代表向一个节点发起命令的客户端抽象，允许未来替换成网络版 (NodeGRPCClient)
-type NodeClient interface {
-	NodeID() string
-	Start() error
-	Stop() error
-	Ping(ctx context.Context) error
-	AddPlayer(ctx context.Context, mapID string, profile *protocol.UserProfile) error
-	RemovePlayer(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error)
-	MovePlayer(ctx context.Context, mapID, username, dir string) (string, protocol.UserProfile, bool, error)
-	Attack(ctx context.Context, mapID, username string) (string, string, string, protocol.UserProfile, bool, error)
-	Heal(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error)
-	BuyItem(ctx context.Context, mapID, username, item string) (string, protocol.UserProfile, bool, error)
-	AttackBoss(ctx context.Context, mapID, username string) (string, protocol.UserProfile, bool, error)
-	Profile(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error)
-	RewardPlayer(ctx context.Context, mapID, username string, treasureDelta, victoryDelta int) (protocol.UserProfile, bool, error)
-	Snapshot(ctx context.Context, mapID string) (protocol.MapView, error)
-	Counts(ctx context.Context, mapID string) (int, int, int, int64, error)
-	Checkpoint(ctx context.Context, mapID string) (protocol.MapCheckpoint, error)
-	Promote(mapID string, cfg world.MapConfig) error
-	View() protocol.NodeView
-	IsHealthy() bool
-	SetHealthy(healthy bool) bool
-}
-
 type MapCacheData struct {
 	View  *protocol.MapView
 	Brief protocol.MapBrief
@@ -57,7 +33,7 @@ type MapCacheData struct {
 type Cluster struct {
 	mu              sync.RWMutex
 	store           *storage.Store
-	nodes           map[string]NodeClient
+	nodes           map[string]managedNodeClient
 	connectingNodes map[string]struct{}
 	// owners 与 replicas 是兼容既有路由逻辑的过渡缓存，只能由 applyTopologyLocked 写入。
 	owners         map[string]string
@@ -89,7 +65,7 @@ type Cluster struct {
 func NewCluster(store *storage.Store) (*Cluster, error) {
 	c := &Cluster{
 		store:           store,
-		nodes:           make(map[string]NodeClient),
+		nodes:           make(map[string]managedNodeClient),
 		connectingNodes: make(map[string]struct{}),
 		owners:          make(map[string]string),
 		replicas:        make(map[string]string),
@@ -463,7 +439,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	}
 
 	c.mu.RLock()
-	nodes := make(map[string]NodeClient, len(c.nodes))
+	nodes := make(map[string]managedNodeClient, len(c.nodes))
 	for k, v := range c.nodes {
 		nodes[k] = v
 	}
@@ -553,7 +529,7 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	return ws, nil
 }
 
-func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, NodeClient, error) {
+func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, GatewayNodeClient, error) {
 	// 1. 优先从本地内存获取无锁化读取
 	if val, ok := c.localSessions.Load(username); ok {
 		session := val.(*storage.GlobalSession)
@@ -745,7 +721,7 @@ func (c *Cluster) mapCacheLoop() {
 			for k, v := range c.owners {
 				owners[k] = v
 			}
-			nodes := make(map[string]NodeClient)
+			nodes := make(map[string]managedNodeClient)
 			for k, v := range c.nodes {
 				nodes[k] = v
 			}
@@ -775,7 +751,7 @@ func (c *Cluster) mapCacheLoop() {
 				}
 				cfg := configs[mapID]
 				wg.Add(1)
-				go func(mapID string, host NodeClient, name string) {
+				go func(mapID string, host GatewayNodeClient, name string) {
 					defer wg.Done()
 
 					// 1. 获取 Snapshot
@@ -836,7 +812,7 @@ func (c *Cluster) heartbeatLoop() {
 				nodeIDs = append(nodeIDs, nodeID)
 			}
 			sort.Strings(nodeIDs)
-			nodes := make([]NodeClient, 0, len(nodeIDs))
+			nodes := make([]managedNodeClient, 0, len(nodeIDs))
 			for _, nodeID := range nodeIDs {
 				nodes = append(nodes, c.nodes[nodeID])
 			}
@@ -845,7 +821,7 @@ func (c *Cluster) heartbeatLoop() {
 			var wg sync.WaitGroup
 			for _, node := range nodes {
 				wg.Add(1)
-				go func(n NodeClient) {
+				go func(n managedNodeClient) {
 					defer wg.Done()
 					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 					defer cancel()
@@ -930,9 +906,7 @@ func (c *Cluster) failNode(nodeID string) (string, error) {
 		// 故障转移前确保 Redis 有最新快照；副本由各自 replicaSyncLoop 自拉。
 		_ = c.store.SaveCheckpoint(cp)
 	}
-	if err := node.Stop(); err != nil {
-		return "", err
-	}
+	// 节点进程由部署系统管理；管理命令仅模拟网关侧连接不可用。
 	node.SetHealthy(false)
 	c.handleNodeFailure(nodeID)
 	c.broadcastGlobalEvent(fmt.Sprintf("管理命令：已模拟 %s 故障，拓扑保持不变", nodeID))
@@ -946,9 +920,7 @@ func (c *Cluster) recoverNode(nodeID string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("节点 %s 不存在", nodeID)
 	}
-	if err := node.Start(); err != nil {
-		return "", err
-	}
+	// 与 failNode 对称：管理命令仅恢复网关侧健康标记，节点进程生命周期由部署系统管理。
 	node.SetHealthy(true)
 
 	c.broadcastGlobalEvent(fmt.Sprintf("管理命令：节点 %s 已恢复在线，拓扑保持不变", nodeID))

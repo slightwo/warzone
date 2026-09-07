@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// NodeGRPCClient 是一个客户端代理，它将本地调用转换为 gRPC 网络请求发给远端 Node。
+// NodeGRPCClient 是节点的 gRPC 传输实现，同时满足网关数据面与协调器控制面接口。
 type NodeGRPCClient struct {
 	client  pb.NodeServiceClient
 	conn    *grpc.ClientConn
@@ -191,12 +191,6 @@ func (c *NodeGRPCClient) Checkpoint(ctx context.Context, mapID string) (protocol
 	return protocol.FromProtoMapCheckpoint(resp.Checkpoint), nil
 }
 
-// Dummy implementations for lifecycle and map management methods
-// to satisfy NodeClient interface. In Stage 5, these will be true RPCs or ignored.
-
-func (c *NodeGRPCClient) Start() error { return nil }
-func (c *NodeGRPCClient) Stop() error  { return nil }
-
 func (c *NodeGRPCClient) Promote(mapID string, cfg world.MapConfig) error {
 	req := &pb.PromoteReq{
 		MapId: mapID,
@@ -227,3 +221,9 @@ func (c *NodeGRPCClient) SetHealthy(healthy bool) bool {
 	c.healthy = healthy
 	return old
 }
+
+var (
+	_ GatewayNodeClient     = (*NodeGRPCClient)(nil)
+	_ CoordinatorNodeClient = (*NodeGRPCClient)(nil)
+	_ managedNodeClient     = (*NodeGRPCClient)(nil)
+)
