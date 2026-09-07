@@ -124,3 +124,15 @@ func TestGatewayOwnerTargetsSkipsUnregisteredOwners(t *testing.T) {
 		t.Fatalf("未注册 owner 不应回退到 replica: %v", targets)
 	}
 }
+
+func TestGatewayOwnerTargetsSkipsDrainingOwner(t *testing.T) {
+	topology := testTopology(1, "node-a", "node-b")
+	targets := gatewayOwnerTargets(topology, []storage.NodeRegistryInfo{{
+		ID:       "node-a",
+		Addr:     "127.0.0.1:9311",
+		Draining: true,
+	}})
+	if len(targets) != 0 {
+		t.Fatalf("draining owner 不应保留数据面目标: %v", targets)
+	}
+}

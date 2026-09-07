@@ -1,23 +1,27 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"google.golang.org/grpc"
 
 	"battleworld/cluster"
+	"battleworld/lifecycle"
 	"battleworld/pb"
 	"battleworld/protocol"
 	"battleworld/storage"
 
-	"net/http"
 	_ "net/http/pprof"
 )
 
@@ -177,6 +181,8 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 }
 
 func main() {
+	lifecycleAddr := flag.String("lifecycle-addr", "", "生命周期 HTTP 监听地址；为空时禁用（如：127.0.0.1:9413）")
+	flag.Parse()
 
 	go func() {
 		_ = http.ListenAndServe("localhost:6060", nil)
@@ -215,6 +221,12 @@ func main() {
 		gameCluster: gameCluster,
 	})
 
+	// draining 标志在 drain 期间返回 503，让调度器停止把新会话路由到本网关。
+	var draining atomic.Bool
+	if *lifecycleAddr != "" {
+		go serveGatewayLifecycle(*lifecycleAddr, grpcServer, &draining)
+	}
+
 	fmt.Printf("gRPC 网关已启动：%s\n", protocol.GatewayAddr)
 
 	go func() {
@@ -224,6 +236,34 @@ func main() {
 
 	if err := grpcServer.Serve(ln); err != nil {
 		fmt.Fprintf(os.Stderr, "gRPC server error: %v\n", err)
+	}
+}
+
+// serveGatewayLifecycle 暴露 /healthz、/readyz、/drain。gateway 的 drain 仅停止接收
+// 新会话，不会主动断开现有 stream；运维应在 drain 完成后再发送 SIGTERM。
+func serveGatewayLifecycle(addr string, grpcServer *grpc.Server, draining *atomic.Bool) {
+	handler := lifecycle.NewHandler(lifecycle.Callbacks{
+		Status: func() lifecycle.Status {
+			return lifecycle.Status{Draining: draining.Load()}
+		},
+		Ready: func() bool {
+			return !draining.Load()
+		},
+		Drain: func(ctx context.Context) error {
+			if !draining.CompareAndSwap(false, true) {
+				return nil
+			}
+			go grpcServer.GracefulStop()
+			return nil
+		},
+	})
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		fmt.Fprintf(os.Stderr, "gateway lifecycle 监听失败：%v\n", err)
 	}
 }
 

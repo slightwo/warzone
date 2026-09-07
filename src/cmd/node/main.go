@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net"
@@ -24,11 +25,15 @@ func main() {
 		nodeAddr               string
 		declaredPrimaryMapsStr string
 		declaredReplicaMapsStr string
+		lifecycleAddr          string
+		drainTimeout           time.Duration
 	)
 	flag.StringVar(&nodeID, "id", "node-a", "节点唯一标识 (如: node-a)")
 	flag.StringVar(&nodeAddr, "addr", "127.0.0.1:9311", "节点监听地址 (如: 127.0.0.1:9311)")
 	flag.StringVar(&declaredPrimaryMapsStr, "maps", "", "节点声明可承载的主地图候选 ID，逗号分隔（如：green,ruins）")
 	flag.StringVar(&declaredReplicaMapsStr, "replicas", "", "节点声明可承载的副本地图候选 ID，逗号分隔")
+	flag.StringVar(&lifecycleAddr, "lifecycle-addr", "", "生命周期 HTTP 监听地址；为空时禁用（如：127.0.0.1:9411）")
+	flag.DurationVar(&drainTimeout, "drain-timeout", 30*time.Second, "节点 drain 等待 coordinator 迁移 owner 地图的最大时长")
 	flag.Parse()
 
 	log.Printf("正在启动物理节点 [%s]，监听地址：%s，声明主地图候选：%s，声明副本地图候选：%s", nodeID, nodeAddr, declaredPrimaryMapsStr, declaredReplicaMapsStr)
@@ -97,18 +102,20 @@ func main() {
 	grpcServer := grpc.NewServer()
 	pb.RegisterNodeServiceServer(grpcServer, grpcNode)
 
-	// 如果有 Redis，则开启心跳上报线程
+	// 如果有 Redis，则开启心跳上报线程。drain 状态会随下一次租约续期被 coordinator 和
+	// gateway 观察到；注册字段只表达候选能力与生命周期状态，不改变拓扑主权。
 	if store != nil {
 		go func() {
 			ticker := time.NewTicker(3 * time.Second)
 			defer ticker.Stop()
-			info := storage.NodeRegistryInfo{
-				ID:       nodeID,
-				Addr:     nodeAddr,
-				Maps:     declaredPrimaryMaps,
-				Replicas: declaredReplicaMaps,
-			}
 			for {
+				info := storage.NodeRegistryInfo{
+					ID:       nodeID,
+					Addr:     nodeAddr,
+					Maps:     declaredPrimaryMaps,
+					Replicas: declaredReplicaMaps,
+					Draining: ns.IsDraining(),
+				}
 				if err := store.RegisterNode(info, 5*time.Second); err != nil {
 					log.Printf("Redis Node心跳失败: %v", err)
 				}
@@ -117,13 +124,23 @@ func main() {
 		}()
 	}
 
+	if lifecycleAddr != "" {
+		go serveLifecycle(lifecycleAddr, ns, drainTimeout)
+	}
+
 	log.Printf("物理节点 [%s] 启动完毕，开始处理网络请求...", nodeID)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		log.Println("收到关闭信号，正在退出...")
+		log.Println("收到关闭信号，开始受控 drain...")
+		ctx, cancel := context.WithTimeout(context.Background(), drainTimeout)
+		defer cancel()
+		if err := ns.BeginDrain(ctx); err != nil {
+			log.Printf("节点 drain 未完成，拒绝退出以保护 owner 地图: %v", err)
+			return
+		}
 		grpcServer.GracefulStop()
 	}()
 

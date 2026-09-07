@@ -22,11 +22,15 @@ const (
 
 type NodeService struct {
 	mu               sync.RWMutex
+	// drainMu 与所有会改变 world 的路径配合，确保 BeginDrain 等待已开始的写入结束，
+	// 并在最终 fenced checkpoint 前阻止后续写入。
+	drainMu          sync.RWMutex
 	ID               string
 	Addr             string
 	store            *storage.Store
 	authority        *authorityCache
 	healthy          bool
+	draining         bool
 	lastHeartbeat    time.Time
 	maps             map[string]*world.World
 	replicaSnapshots map[string]protocol.MapCheckpoint
@@ -114,6 +118,13 @@ func (n *NodeService) refreshTopology() error {
 
 // RequireAuthority 在所有地图状态写入进入 world 前执行 owner/epoch fencing。
 func (n *NodeService) RequireAuthority(mapID string, epoch uint64) error {
+	if n.IsDraining() {
+		return ErrNodeDraining
+	}
+	return n.requireAuthority(mapID, epoch)
+}
+
+func (n *NodeService) requireAuthority(mapID string, epoch uint64) error {
 	if n.authority == nil {
 		return ErrTopologyAuthorityUnavailable
 	}
@@ -131,7 +142,25 @@ func (n *NodeService) RequireAuthority(mapID string, epoch uint64) error {
 	return nil
 }
 
+// beginWrite 返回一次受 drain 保护的写入释放函数。BeginDrain 取得排他锁后，会等待
+// 已经开始的世界写入结束，之后阻止新的 tick 和数据面写入进入。
+func (n *NodeService) beginWrite(mapID string, epoch uint64) (func(), error) {
+	n.drainMu.RLock()
+	if n.IsDraining() {
+		n.drainMu.RUnlock()
+		return nil, ErrNodeDraining
+	}
+	if err := n.requireAuthority(mapID, epoch); err != nil {
+		n.drainMu.RUnlock()
+		return nil, err
+	}
+	return n.drainMu.RUnlock, nil
+}
+
 func (n *NodeService) RequirePromotionCandidate(mapID string, targetEpoch uint64) error {
+	if n.IsDraining() {
+		return ErrNodeDraining
+	}
 	if n.authority == nil {
 		return ErrTopologyAuthorityUnavailable
 	}
@@ -154,6 +183,10 @@ func (n *NodeService) flushLoop() {
 
 			n.mu.RLock()
 			// 仅当前 owner 可下沉在线热数据；旧 owner 超过主权宽限期后完全停止写入。
+			if n.draining {
+				n.mu.RUnlock()
+				continue
+			}
 			for mapID, instance := range n.maps {
 				if _, owned := n.authority.Current(mapID); !owned {
 					continue
@@ -219,26 +252,30 @@ func (n *NodeService) tickLoop() {
 
 			for mapID, instance := range instances {
 				authority, owned := n.authority.Current(mapID)
-				if !owned || n.RequireAuthority(mapID, authority.Epoch) != nil {
+				if !owned {
+					continue
+				}
+				release, err := n.beginWrite(mapID, authority.Epoch)
+				if err != nil {
 					continue
 				}
 				// 1. world 变更前已即时校验 Redis fence；fence 失效则不会产生事件。
 				events := instance.BackgroundStep()
 				// 2. CAS 可能与 BackgroundStep 并发完成，因此发布事件和 checkpoint 前再次
 				// 校验。失败时不发布刚才产生的本地事件，并让下一轮重新从新 owner 读取。
-				if n.RequireAuthority(mapID, authority.Epoch) != nil {
-					continue
-				}
-				for _, event := range events {
-					if err := n.store.PublishEvent("events:map:"+mapID, event); err != nil {
-						log.Printf("[tick] 发布地图 %s 事件失败: %v", mapID, err)
+				if err := n.requireAuthority(mapID, authority.Epoch); err == nil {
+					for _, event := range events {
+						if err := n.store.PublishEvent("events:map:"+mapID, event); err != nil {
+							log.Printf("[tick] 发布地图 %s 事件失败: %v", mapID, err)
+						}
+					}
+					cp := instance.CaptureCheckpoint(n.ID)
+					cp.MapEpoch = authority.Epoch
+					if err := n.store.SaveCheckpointIfOwner(cp, n.ID, authority.Epoch); err != nil {
+						log.Printf("[tick] 保存地图 %s 的 fenced 快照失败: %v", mapID, err)
 					}
 				}
-				cp := instance.CaptureCheckpoint(n.ID)
-				cp.MapEpoch = authority.Epoch
-				if err := n.store.SaveCheckpointIfOwner(cp, n.ID, authority.Epoch); err != nil {
-					log.Printf("[tick] 保存地图 %s 的 fenced 快照失败: %v", mapID, err)
-				}
+				release()
 			}
 		case <-n.stopCh:
 			return
@@ -301,9 +338,11 @@ func (n *NodeService) RestorePrimaryMap(cfg world.MapConfig, cp protocol.MapChec
 }
 
 func (n *NodeService) AddPlayer(ctx context.Context, mapID string, epoch uint64, profile *protocol.UserProfile) error {
-	if err := n.RequireAuthority(mapID, epoch); err != nil {
+	release, err := n.beginWrite(mapID, epoch)
+	if err != nil {
 		return err
 	}
+	defer release()
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -315,9 +354,11 @@ func (n *NodeService) AddPlayer(ctx context.Context, mapID string, epoch uint64,
 }
 
 func (n *NodeService) RemovePlayer(ctx context.Context, mapID, username string, epoch uint64) (protocol.UserProfile, bool, error) {
-	if err := n.RequireAuthority(mapID, epoch); err != nil {
+	release, err := n.beginWrite(mapID, epoch)
+	if err != nil {
 		return protocol.UserProfile{}, false, err
 	}
+	defer release()
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -329,9 +370,11 @@ func (n *NodeService) RemovePlayer(ctx context.Context, mapID, username string, 
 }
 
 func (n *NodeService) MovePlayer(ctx context.Context, mapID, username, dir string, epoch uint64) (string, protocol.UserProfile, bool, error) {
-	if err := n.RequireAuthority(mapID, epoch); err != nil {
+	release, err := n.beginWrite(mapID, epoch)
+	if err != nil {
 		return "", protocol.UserProfile{}, false, err
 	}
+	defer release()
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -343,9 +386,11 @@ func (n *NodeService) MovePlayer(ctx context.Context, mapID, username, dir strin
 }
 
 func (n *NodeService) Attack(ctx context.Context, mapID, username string, epoch uint64) (string, string, string, protocol.UserProfile, bool, error) {
-	if err := n.RequireAuthority(mapID, epoch); err != nil {
+	release, err := n.beginWrite(mapID, epoch)
+	if err != nil {
 		return "", "", "", protocol.UserProfile{}, false, err
 	}
+	defer release()
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -357,9 +402,11 @@ func (n *NodeService) Attack(ctx context.Context, mapID, username string, epoch 
 }
 
 func (n *NodeService) Heal(ctx context.Context, mapID, username string, epoch uint64) (string, protocol.UserProfile, bool, error) {
-	if err := n.RequireAuthority(mapID, epoch); err != nil {
+	release, err := n.beginWrite(mapID, epoch)
+	if err != nil {
 		return "", protocol.UserProfile{}, false, err
 	}
+	defer release()
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -371,9 +418,11 @@ func (n *NodeService) Heal(ctx context.Context, mapID, username string, epoch ui
 }
 
 func (n *NodeService) BuyItem(ctx context.Context, mapID, username, item string, epoch uint64) (string, protocol.UserProfile, bool, error) {
-	if err := n.RequireAuthority(mapID, epoch); err != nil {
+	release, err := n.beginWrite(mapID, epoch)
+	if err != nil {
 		return "", protocol.UserProfile{}, false, err
 	}
+	defer release()
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -396,9 +445,11 @@ func (n *NodeService) Profile(ctx context.Context, mapID, username string) (prot
 }
 
 func (n *NodeService) RewardPlayer(ctx context.Context, mapID, username string, treasureDelta, victoryDelta int, epoch uint64) (protocol.UserProfile, bool, error) {
-	if err := n.RequireAuthority(mapID, epoch); err != nil {
+	release, err := n.beginWrite(mapID, epoch)
+	if err != nil {
 		return protocol.UserProfile{}, false, err
 	}
+	defer release()
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -422,9 +473,11 @@ func manhattan(ax, ay, bx, by int) int {
 }
 
 func (n *NodeService) AttackBoss(ctx context.Context, mapID, username string, epoch uint64) (string, protocol.UserProfile, bool, error) {
-	if err := n.RequireAuthority(mapID, epoch); err != nil {
+	release, err := n.beginWrite(mapID, epoch)
+	if err != nil {
 		return "", protocol.UserProfile{}, false, err
 	}
+	defer release()
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
@@ -525,9 +578,11 @@ func (n *NodeService) Checkpoint(ctx context.Context, mapID string) (protocol.Ma
 }
 
 func (n *NodeService) BackgroundStep(mapID string, epoch uint64) ([]string, error) {
-	if err := n.RequireAuthority(mapID, epoch); err != nil {
+	release, err := n.beginWrite(mapID, epoch)
+	if err != nil {
 		return nil, err
 	}
+	defer release()
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()

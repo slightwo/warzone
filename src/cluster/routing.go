@@ -99,6 +99,11 @@ func gatewayOwnerTargets(topology storage.Topology, registrations []storage.Node
 		if _, owner := owners[registration.ID]; !owner {
 			continue
 		}
+		// 主动 drain 的节点保留在已提交 Topology 中直到 coordinator 完成有序移交，
+		// 但 gateway 不再为其建立或复用数据面连接，避免新会话继续落到下线节点。
+		if registration.Draining {
+			continue
+		}
 		if strings.TrimSpace(registration.Addr) == "" || registration.Addr != strings.TrimSpace(registration.Addr) {
 			continue
 		}

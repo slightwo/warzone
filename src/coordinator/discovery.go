@@ -32,6 +32,7 @@ func (c *Coordinator) discoverOnce() {
 		return
 	}
 	c.discoverNodes(activeNodes)
+	c.reconcileDrainingNodes(activeNodes)
 	if err := c.bootstrapTopologyIfAbsent(c.connectedNodeRegistrations(activeNodes)); err != nil {
 		log.Printf("[coordinator/topology] bootstrap 失败: %v", err)
 	}
@@ -46,6 +47,9 @@ func (c *Coordinator) discoverNodes(activeNodes []storage.NodeRegistryInfo) {
 		return
 	}
 	for _, info := range activeNodes {
+		if info.Draining {
+			continue
+		}
 		if _, connected := c.nodes[info.ID]; connected {
 			continue
 		}
@@ -109,6 +113,9 @@ func (c *Coordinator) connectedNodeRegistrations(activeNodes []storage.NodeRegis
 
 	connected := make([]storage.NodeRegistryInfo, 0, len(activeNodes))
 	for _, info := range activeNodes {
+		if info.Draining {
+			continue
+		}
 		connection, ok := c.nodes[info.ID]
 		if !ok || !connection.healthy {
 			continue

@@ -619,6 +619,9 @@ type NodeRegistryInfo struct {
 	Addr     string   `json:"addr"`
 	Maps     []string `json:"maps"`
 	Replicas []string `json:"replicas"`
+	// Draining 表示节点正在执行受控下线。它是候选与连接调度信号，不直接授予或
+	// 收回主权；coordinator 必须通过带 epoch 的拓扑提交完成实际地图移交。
+	Draining bool `json:"draining"`
 }
 
 // RegisterNode 以租约形式上报节点注册信息；该操作不会修改 Topology。

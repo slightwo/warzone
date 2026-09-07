@@ -3,6 +3,7 @@ package node
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -119,6 +120,24 @@ func (c *authorityCache) Current(mapID string) (MapAuthority, bool) {
 		return MapAuthority{}, false
 	}
 	return authority, true
+}
+
+// OwnedMapIDs 返回当前仍由本节点拥有的地图以及拓扑缓存是否在宽限期内。drain 在等待
+// coordinator 完成主权移交时使用它；缓存过期绝不能被误判为“已迁移完成”。
+func (c *authorityCache) OwnedMapIDs() ([]string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if !c.freshLocked() {
+		return nil, false
+	}
+	mapIDs := make([]string, 0)
+	for mapID, owner := range c.topology.Owners {
+		if owner == c.nodeID && c.topology.MapEpochs[mapID] > 0 {
+			mapIDs = append(mapIDs, mapID)
+		}
+	}
+	sort.Strings(mapIDs)
+	return mapIDs, true
 }
 
 // RequirePromotionCandidate 在 topology 尚未提交前允许 coordinator 对当前副本执行
