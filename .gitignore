@@ -11,9 +11,5 @@ src/cmd/benchmark/server.log
 *.log
 log/
 
-# Local helper scripts
-start.sh
-stop.sh
-
 # macOS Finder metadata
 .DS_Store

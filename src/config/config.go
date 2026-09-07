@@ -3,9 +3,18 @@ package config
 import (
 	"fmt"
 	"os"
-	"os/user"
 	"strconv"
 	"strings"
+)
+
+const (
+	// 本地联调默认存储配置。环境变量仍可覆盖这些值，便于需要连接其它环境时使用。
+	defaultDBHost     = "127.0.0.1"
+	defaultDBPort     = "5432"
+	defaultDBUser     = "wu_han_wen"
+	defaultDBName     = "battleworld"
+	defaultDBPassword = "Wu050601&&"
+	defaultRedisPort  = "6379"
 )
 
 // EnvOr 返回环境变量 key 的非空值；为空时回退到 def。
@@ -26,29 +35,19 @@ func EnvOrAny(def string, keys ...string) string {
 	return def
 }
 
-// 数据库连接配置。优先采用 BATTLEWORLD_*，兼容先前的 BW_* 命名。
-func DBHost() string { return EnvOrAny("127.0.0.1", "BATTLEWORLD_STORE_ADDR", "BW_DB_HOST") }
+// 数据库连接配置。未设置环境变量时直接使用本地联调默认值。
+func DBHost() string     { return EnvOrAny(defaultDBHost, "BATTLEWORLD_STORE_ADDR", "BW_DB_HOST") }
+func DBUser() string     { return EnvOrAny(defaultDBUser, "BATTLEWORLD_PGUSER", "BW_DB_USER", "PGUSER") }
+func DBPassword() string { return EnvOrAny(defaultDBPassword, "BATTLEWORLD_PGPASSWORD", "BW_DB_PASSWORD") }
+func DBName() string     { return EnvOrAny(defaultDBName, "BATTLEWORLD_PGDB", "BW_DB_NAME") }
+func DBPort() string     { return EnvOrAny(defaultDBPort, "BATTLEWORLD_PGPORT", "BW_DB_PORT") }
 
-func DBUser() string {
-	if configured := EnvOrAny("", "BATTLEWORLD_PGUSER", "BW_DB_USER", "PGUSER"); configured != "" {
-		return configured
-	}
-	if current, err := user.Current(); err == nil && current.Username != "" {
-		return current.Username
-	}
-	return "postgres"
-}
-
-func DBPassword() string { return EnvOrAny("", "BATTLEWORLD_PGPASSWORD", "BW_DB_PASSWORD") }
-func DBName() string     { return EnvOrAny("battleworld", "BATTLEWORLD_PGDB", "BW_DB_NAME") }
-func DBPort() string     { return EnvOrAny("5432", "BATTLEWORLD_PGPORT", "BW_DB_PORT") }
-
-// Redis 连接配置。
+// Redis 连接配置。未设置环境变量时连接本机默认实例。
 func RedisAddr() string {
 	if addr := EnvOrAny("", "BW_REDIS_ADDR"); addr != "" {
 		return addr
 	}
-	return fmt.Sprintf("%s:%s", DBHost(), EnvOrAny("6379", "BATTLEWORLD_REDIS_PORT"))
+	return fmt.Sprintf("%s:%s", defaultDBHost, EnvOrAny(defaultRedisPort, "BATTLEWORLD_REDIS_PORT"))
 }
 
 func RedisPassword() string { return EnvOrAny("", "BATTLEWORLD_REDIS_PASSWORD", "BW_REDIS_PASSWORD") }
