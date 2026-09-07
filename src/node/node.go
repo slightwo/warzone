@@ -127,8 +127,9 @@ func (n *NodeService) RemoveHostedMap(mapID string) {
 	delete(n.maps, mapID)
 }
 
-// AddReplicaMap 登记本节点托管的副本地图（由 -replicas 启动参数传入）。
-// 副本数据由 replicaSyncLoop 定期从 Redis 拉取，无需协调器推送。
+// AddReplicaMap 登记本节点本地预加载的副本地图（由 -replicas 启动参数传入）。
+// 该本地能力不代表路由副本主权；副本归属仅由已提交的 Topology 决定。副本数据由
+// replicaSyncLoop 定期从 Redis 拉取，无需协调器推送。
 func (n *NodeService) AddReplicaMap(mapID string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()

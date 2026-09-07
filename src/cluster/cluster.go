@@ -55,13 +55,17 @@ type MapCacheData struct {
 }
 
 type Cluster struct {
-	mu       sync.RWMutex
-	store    *storage.Store
-	nodes    map[string]NodeClient
-	owners   map[string]string          //key==mapID
-	replicas map[string]string          //..
-	configs  map[string]world.MapConfig //..
-	stopCh   chan struct{}
+	mu              sync.RWMutex
+	store           *storage.Store
+	nodes           map[string]NodeClient
+	connectingNodes map[string]struct{}
+	// owners 与 replicas 是兼容既有路由逻辑的过渡缓存，只能由 applyTopologyLocked 写入。
+	owners         map[string]string
+	replicas       map[string]string
+	topology       storage.Topology
+	topologyLoaded bool
+	configs        map[string]world.MapConfig
+	stopCh         chan struct{}
 
 	mapCacheMu sync.RWMutex
 	mapCache   map[string]MapCacheData
@@ -84,15 +88,16 @@ type Cluster struct {
 
 func NewCluster(store *storage.Store) (*Cluster, error) {
 	c := &Cluster{
-		store:      store,
-		nodes:      make(map[string]NodeClient),
-		owners:     make(map[string]string),
-		replicas:   make(map[string]string),
-		configs:    make(map[string]world.MapConfig),
-		stopCh:     make(chan struct{}),
-		mapCache:   make(map[string]MapCacheData),
-		mapEvents:  make(map[string][]string),
-		userEvents: make(map[string][]string),
+		store:           store,
+		nodes:           make(map[string]NodeClient),
+		connectingNodes: make(map[string]struct{}),
+		owners:          make(map[string]string),
+		replicas:        make(map[string]string),
+		configs:         make(map[string]world.MapConfig),
+		stopCh:          make(chan struct{}),
+		mapCache:        make(map[string]MapCacheData),
+		mapEvents:       make(map[string][]string),
+		userEvents:      make(map[string][]string),
 	}
 
 	for _, cfg := range world.AvailableMaps() {
@@ -111,18 +116,19 @@ func NewCluster(store *storage.Store) (*Cluster, error) {
 		store.InitGlobalBoss(1600, initialState)
 	}
 
-	// 拓扑结构不再硬编码，而是由 discoveryLoop 动态从 Redis 发现节点并接管
+	// 路由拓扑由 Redis 中已提交的 Topology 决定；discovery 只维护节点连接池。
 	c.pubsub = store.SubscribeEvents()
 	go c.eventLoop()
 	return c, nil
 }
 
 func (c *Cluster) Start() error {
-	for _, node := range c.nodes {
-		if err := node.Start(); err != nil {
-			return err
-		}
+	if updated, err := c.loadTopology(); err != nil {
+		log.Printf("[topology] 启动时加载拓扑失败，将保留最后成功快照: %v", err)
+	} else if updated {
+		log.Printf("[topology] 启动时已加载路由快照")
 	}
+	go c.topologySyncLoop()
 	go c.mapCacheLoop()
 	go c.discoveryLoop()
 	go c.heartbeatLoop()
@@ -194,7 +200,7 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 	owner := c.nodes[ownerID]
 	c.mu.Unlock()
 
-	if owner == nil {
+	if owner == nil || !owner.IsHealthy() {
 		return nil, errors.New("目标地图当前没有可用节点")
 	}
 
@@ -229,13 +235,17 @@ func (c *Cluster) Logout(username string) error {
 	c.localSessions.Delete(username) // 同理，也删除本地缓存
 	c.mu.Unlock()
 
+	c.mu.RLock()
 	node := c.nodes[session.NodeID]
-	if node == nil {
+	c.mu.RUnlock()
+	if node == nil || !node.IsHealthy() {
 		return c.store.DeleteHotSession(username)
 	}
-	profile, removed, err := node.RemovePlayer(context.Background(), session.MapID, username)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	profile, removed, err := node.RemovePlayer(ctx, session.MapID, username)
 	if err != nil {
-		fmt.Printf("[ERROR] RPC Node RemovePlayer failed: %v\n", err)
+		log.Printf("[logout] 节点 %s 移除玩家 %s 失败: %v", session.NodeID, username, err)
 	} else if removed {
 		profile.LastNode = session.NodeID
 		profile.LastMap = session.MapID
@@ -365,9 +375,12 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 		c.mu.RUnlock()
 		return nil, errors.New("倒地时不可切换地图")
 	}
-	dst_node := c.owners[targetMap]
-	dst := c.nodes[dst_node]
+	dstNodeID := c.owners[targetMap]
+	dst := c.nodes[dstNodeID]
 	c.mu.RUnlock()
+	if dst == nil || !dst.IsHealthy() {
+		return nil, fmt.Errorf("目标地图 %q 当前没有可用节点", targetMap)
+	}
 
 	profile, ok, err = src_node.RemovePlayer(context.Background(), session.MapID, username)
 	if err != nil {
@@ -401,7 +414,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 	}
 
 	profile.LastMap = targetMap
-	profile.LastNode = dst_node
+	profile.LastNode = dstNodeID
 
 	c.mu.Lock()
 	session, ok = c.store.LoadGlobalSession(username)
@@ -549,7 +562,7 @@ func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, NodeClie
 		node := c.nodes[session.NodeID]
 		c.mu.RUnlock()
 
-		if node == nil {
+		if node == nil || !node.IsHealthy() {
 			return nil, nil, fmt.Errorf("节点 %q 当前不可用", session.NodeID)
 		}
 
@@ -570,7 +583,7 @@ func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, NodeClie
 	c.localSessions.Store(username, session)
 
 	node := c.nodes[session.NodeID]
-	if node == nil {
+	if node == nil || !node.IsHealthy() {
 		return nil, nil, fmt.Errorf("节点 %q 当前不可用", session.NodeID)
 	}
 	copySession := *session
@@ -623,7 +636,7 @@ func (c *Cluster) respawnBossAfterCooldown(name string) {
 }
 
 func (c *Cluster) discoveryLoop() {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -631,78 +644,93 @@ func (c *Cluster) discoveryLoop() {
 		case <-ticker.C:
 			activeNodes, err := c.store.GetActiveNodes()
 			if err != nil {
+				log.Printf("[discovery] 读取活跃节点失败: %v", err)
 				continue
 			}
+			c.discoverNodes(activeNodes)
 
-			// 改进 1：先使用只读锁(RLock)快速扫描出尚未注册的“新节点”结构
-			var newInfos []storage.NodeRegistryInfo
-			c.mu.RLock()
-			for _, info := range activeNodes {
-				if _, ok := c.nodes[info.ID]; !ok {
-					newInfos = append(newInfos, info)
-				}
+			// 只有 Redis 中尚不存在拓扑时，才允许依据候选能力执行一次 bootstrap。
+			// 已提交拓扑后，后续注册/重连只能影响连接池，不得覆写路由主权。
+			if err := c.bootstrapTopologyIfAbsent(c.connectedNodeRegistrations(activeNodes)); err != nil {
+				log.Printf("[topology] bootstrap 失败: %v", err)
 			}
-			c.mu.RUnlock()
-
-			// 改进 2：对于每一个新节点，启动独立的异步协程处理网络连接和推送快照，不再阻塞 Cluster 主循环
-			for _, info := range newInfos {
-				go func(nInfo storage.NodeRegistryInfo) {
-					// 独立发起耗时的网络握手
-					client, err := NewNodeGRPCClient(nInfo.ID, nInfo.Addr)
-					if err != nil {
-						// 连接失败直接返回，下次轮询时该节点如果在Redis且未注册还会被发现并重试
-						return
-					}
-
-					// 【修复点】：确认新节点确实存活。因为Redis里可能有并未过期的已宕机脏数据
-					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-					defer cancel()
-					if err := client.Ping(ctx); err != nil {
-						return
-					}
-
-					// 调用它的 Start
-					if err := client.Start(); err != nil {
-						log.Printf("[节点发现] 启动节点客户端 %s 失败: %v", nInfo.ID, err)
-						return
-					}
-
-					// 获取短写锁，将验证好的新节点挂入路由拓扑 (不在此锁内发 RPC)
-					c.mu.Lock()
-					// 需做二次校验以防御重入
-					if _, exists := c.nodes[nInfo.ID]; exists {
-						c.mu.Unlock()
-						return
-					}
-					c.nodes[nInfo.ID] = client
-
-					// 【前提假设：保证无冲突抢占】分配该节点声明的各种地图映射
-					for _, mapID := range nInfo.Maps {
-						cfg := c.configs[mapID]
-						if cfg.ID != "" {
-							c.owners[mapID] = nInfo.ID
-							fmt.Printf("[Cluster 节点发现] 新节点上线: %s, 负责接管地图: %s\n", nInfo.ID, mapID)
-						}
-					}
-					// 【新增】分配该节点声明的副本映射
-					for _, mapID := range nInfo.Replicas {
-						cfg := c.configs[mapID]
-						if cfg.ID != "" {
-							c.replicas[mapID] = nInfo.ID
-							fmt.Printf("[Cluster 节点发现] 新节点上线: %s, 负责副本同步: %s\n", nInfo.ID, mapID)
-						}
-					}
-					c.mu.Unlock()
-
-					// 节点自治：地图数据由节点启动时自拉 checkpoint 恢复（见 cmd/node/main.go），
-					// 协调器不再向节点推送快照。
-				}(info)
-			}
-
 		case <-c.stopCh:
 			return
 		}
 	}
+}
+
+// discoverNodes 仅建立并维护可用节点连接，不根据节点注册声明修改路由拓扑。
+func (c *Cluster) discoverNodes(activeNodes []storage.NodeRegistryInfo) {
+	c.mu.Lock()
+	pending := make([]storage.NodeRegistryInfo, 0, len(activeNodes))
+	for _, info := range activeNodes {
+		if _, connected := c.nodes[info.ID]; connected {
+			continue
+		}
+		if _, connecting := c.connectingNodes[info.ID]; connecting {
+			continue
+		}
+		c.connectingNodes[info.ID] = struct{}{}
+		pending = append(pending, info)
+	}
+	c.mu.Unlock()
+
+	for _, info := range pending {
+		go c.connectDiscoveredNode(info)
+	}
+}
+
+func (c *Cluster) connectDiscoveredNode(info storage.NodeRegistryInfo) {
+	client, err := NewNodeGRPCClient(info.ID, info.Addr)
+	if err != nil {
+		c.finishNodeConnection(info.ID)
+		log.Printf("[discovery] 创建节点 %s 客户端失败: %v", info.ID, err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	err = client.Ping(ctx)
+	cancel()
+	if err != nil {
+		_ = client.Close()
+		c.finishNodeConnection(info.ID)
+		log.Printf("[discovery] 节点 %s 健康检查失败: %v", info.ID, err)
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.connectingNodes, info.ID)
+	if _, exists := c.nodes[info.ID]; exists {
+		_ = client.Close()
+		return
+	}
+	c.nodes[info.ID] = client
+	log.Printf("[discovery] 节点 %s 已加入连接池", info.ID)
+}
+
+func (c *Cluster) finishNodeConnection(nodeID string) {
+	c.mu.Lock()
+	delete(c.connectingNodes, nodeID)
+	c.mu.Unlock()
+}
+
+// connectedNodeRegistrations 仅保留已完成连接且健康的节点注册信息，避免将 Redis 中
+// 尚未验证可达性的临时/过期租约用于 bootstrap。
+func (c *Cluster) connectedNodeRegistrations(activeNodes []storage.NodeRegistryInfo) []storage.NodeRegistryInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	connected := make([]storage.NodeRegistryInfo, 0, len(activeNodes))
+	for _, info := range activeNodes {
+		node, ok := c.nodes[info.ID]
+		if !ok || !node.IsHealthy() {
+			continue
+		}
+		connected = append(connected, info)
+	}
+	return connected
 }
 
 func (c *Cluster) mapCacheLoop() {
@@ -839,82 +867,29 @@ func (c *Cluster) heartbeatLoop() {
 	}
 }
 
+// handleNodeFailure 在 2.2-A 只标记节点不可用，不得在内存中提升副本或改写拓扑。
+// 故障节点的客户端连接暂留在连接池中，以支持 recoverNode 的原地恢复；连接池回收会在
+// 2.2-C 的带 epoch 故障转移中与拓扑切换一并实现。完整的 Promote、MapEpoch fencing、
+// Topology CAS 与会话迁移也将在该阶段作为一个原子流程实现。
 func (c *Cluster) handleNodeFailure(nodeID string) {
-	c.mu.Lock()
-	var map2Change []string
-	for mapID, ownerID := range c.owners {
-		if ownerID == nodeID {
-			map2Change = append(map2Change, mapID)
-		}
-	}
-
-	var replicaMaps2Change []string
-	for mapID, replicaID := range c.replicas {
-		if replicaID == nodeID {
-			replicaMaps2Change = append(replicaMaps2Change, mapID)
-		}
-	}
-
-	for _, mapID := range map2Change {
-		replicasID := c.replicas[mapID]
-		replicasNode := c.nodes[replicasID]
-		if replicasNode == nil || !replicasNode.IsHealthy() {
-			continue
-		}
-		if err := replicasNode.Promote(mapID, c.configs[mapID]); err != nil {
-			log.Printf("[failover] 副本提升 %s 失败: %v", mapID, err)
-			continue
-		}
-		delete(c.replicas, mapID)
-		newReplicaID := c.pickReplicaLocked(replicasID)
-		c.replicas[mapID] = newReplicaID
-		c.owners[mapID] = replicasID
-	}
-
-	for _, mapID := range replicaMaps2Change {
-		newReplicaID := c.pickReplicaLocked(c.owners[mapID])
-		c.replicas[mapID] = newReplicaID
-
-	}
-	sessions, err := c.store.GetAllGlobalSessions()
-	if err != nil {
-		log.Printf("[failover] 获取全局会话列表失败: %v", err)
-	} else {
-		for _, session := range sessions {
-			if session.NodeID == nodeID {
-				session.NodeID = c.owners[session.MapID]
-				c.store.SaveGlobalSession(session)
-
-				// 节点失效时的补救：更新内存缓存
-				if val, ok := c.localSessions.Load(session.Username); ok {
-					cachedSession := val.(*storage.GlobalSession)
-					cachedSession.NodeID = session.NodeID
-					c.localSessions.Store(session.Username, cachedSession)
-				}
+	c.mu.RLock()
+	affectedMaps := make([]string, 0)
+	if c.topologyLoaded {
+		for mapID, ownerID := range c.topology.Owners {
+			if ownerID == nodeID {
+				affectedMaps = append(affectedMaps, mapID)
 			}
 		}
 	}
-	// 【新增】从注册表中物理移除该失效节点
-	delete(c.nodes, nodeID)
-	c.mu.Unlock()
-	c.broadcastGlobalEvent(fmt.Sprintf("%q 发生故障，已转移其他节点负责", nodeID))
-}
+	c.mu.RUnlock()
+	sort.Strings(affectedMaps)
 
-func (c *Cluster) pickReplicaLocked(ownerID string) string {
-	nodeIDs := make([]string, 0, len(c.nodes))
-	for nodeID := range c.nodes {
-		nodeIDs = append(nodeIDs, nodeID)
+	if len(affectedMaps) == 0 {
+		log.Printf("[failover] 节点 %s 不再承载任何已提交地图，拓扑保持版本不变", nodeID)
+	} else {
+		log.Printf("[failover] 节点 %s 不可用，受影响地图=%v；等待 2.2-C 的带 epoch 故障转移", nodeID, affectedMaps)
 	}
-	sort.Strings(nodeIDs)
-	for _, nodeID := range nodeIDs {
-		if nodeID == ownerID {
-			continue
-		}
-		if c.nodes[nodeID].IsHealthy() {
-			return nodeID
-		}
-	}
-	return ""
+	c.broadcastGlobalEvent(fmt.Sprintf("%q 发生故障，当前拓扑保持不变，受影响地图暂不可用", nodeID))
 }
 
 func (c *Cluster) adminStatus() string {
@@ -942,10 +917,6 @@ func (c *Cluster) adminStatus() string {
 func (c *Cluster) failNode(nodeID string) (string, error) {
 	c.mu.RLock()
 	node, ok := c.nodes[nodeID]
-	replicas := make(map[string]string, len(c.replicas))
-	for mapID, replicaID := range c.replicas {
-		replicas[mapID] = replicaID
-	}
 	c.mu.RUnlock()
 	if !ok {
 		return "", fmt.Errorf("节点 %s 不存在", nodeID)
@@ -964,8 +935,8 @@ func (c *Cluster) failNode(nodeID string) (string, error) {
 	}
 	node.SetHealthy(false)
 	c.handleNodeFailure(nodeID)
-	c.broadcastGlobalEvent(fmt.Sprintf("管理命令：已模拟 %s 故障，集群开始故障转移", nodeID))
-	return fmt.Sprintf("节点 %s 已被标记为故障，并触发主从切换", nodeID), nil
+	c.broadcastGlobalEvent(fmt.Sprintf("管理命令：已模拟 %s 故障，拓扑保持不变", nodeID))
+	return fmt.Sprintf("节点 %s 已被标记为故障；受影响地图将暂不可用，等待带 epoch 的故障转移", nodeID), nil
 }
 
 func (c *Cluster) recoverNode(nodeID string) (string, error) {
@@ -980,18 +951,8 @@ func (c *Cluster) recoverNode(nodeID string) (string, error) {
 	}
 	node.SetHealthy(true)
 
-	c.mu.Lock()
-	for mapID, ownerID := range c.owners {
-		if ownerID == nodeID {
-			continue
-		}
-		// 副本数据由节点 replicaSyncLoop 自拉，此处只恢复副本拓扑关系。
-		c.replicas[mapID] = nodeID
-	}
-	c.mu.Unlock()
-
-	c.broadcastGlobalEvent(fmt.Sprintf("管理命令：节点 %s 已恢复在线，并重新接管副本同步", nodeID))
-	return fmt.Sprintf("节点 %s 已恢复，最新快照已重新装载", nodeID), nil
+	c.broadcastGlobalEvent(fmt.Sprintf("管理命令：节点 %s 已恢复在线，拓扑保持不变", nodeID))
+	return fmt.Sprintf("节点 %s 已恢复；其注册声明不会修改已提交拓扑", nodeID), nil
 }
 
 func (c *Cluster) buildBossSites() []protocol.BossSite {
@@ -1033,6 +994,15 @@ func (c *Cluster) eventLoop() {
 			if msg == nil {
 				continue
 			}
+			if msg.Channel == storage.TopologyEventChannel {
+				if updated, err := c.loadTopology(); err != nil {
+					log.Printf("[topology] 收到刷新通知后加载失败: %v", err)
+				} else if updated {
+					log.Printf("[topology] 已通过通知刷新路由快照")
+				}
+				continue
+			}
+
 			c.eventMu.Lock()
 			if msg.Channel == "events:global" {
 				c.globalEvents = append(c.globalEvents, msg.Payload)

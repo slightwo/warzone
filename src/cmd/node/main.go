@@ -20,18 +20,18 @@ import (
 
 func main() {
 	var (
-		nodeID      string
-		nodeAddr    string
-		mapsStr     string
-		replicasStr string
+		nodeID                 string
+		nodeAddr               string
+		declaredPrimaryMapsStr string
+		declaredReplicaMapsStr string
 	)
 	flag.StringVar(&nodeID, "id", "node-a", "节点唯一标识 (如: node-a)")
 	flag.StringVar(&nodeAddr, "addr", "127.0.0.1:9311", "节点监听地址 (如: 127.0.0.1:9311)")
-	flag.StringVar(&mapsStr, "maps", "", "节点托管的主地图ID, 逗号分隔 (如: green,ruins)")
-	flag.StringVar(&replicasStr, "replicas", "", "节点托管的副本地图ID, 逗号分隔")
+	flag.StringVar(&declaredPrimaryMapsStr, "maps", "", "节点声明可承载的主地图候选 ID，逗号分隔（如：green,ruins）")
+	flag.StringVar(&declaredReplicaMapsStr, "replicas", "", "节点声明可承载的副本地图候选 ID，逗号分隔")
 	flag.Parse()
 
-	log.Printf("正在启动物理节点 [%s]，监听地址：%s，托管地图：%s，托管副本：%s", nodeID, nodeAddr, mapsStr, replicasStr)
+	log.Printf("正在启动物理节点 [%s]，监听地址：%s，声明主地图候选：%s，声明副本地图候选：%s", nodeID, nodeAddr, declaredPrimaryMapsStr, declaredReplicaMapsStr)
 
 	// 连接 Store 获取 Redis
 	store, err := storage.NewStore(".")
@@ -45,11 +45,12 @@ func main() {
 	}
 	defer ns.Stop()
 
-	// 本地将分配的地图全部实例化跑起来
-	maps := strings.Split(mapsStr, ",")
+	// 当前启动参数仍决定节点预加载的本地地图；注册信息只将其作为候选能力上报，
+	// 实际路由主权由控制面提交的 Topology 决定。
+	declaredPrimaryMapIDs := strings.Split(declaredPrimaryMapsStr, ",")
 	available := world.AvailableMaps()
-	var hostedMaps []string
-	for _, mapID := range maps {
+	var declaredPrimaryMaps []string
+	for _, mapID := range declaredPrimaryMapIDs {
 		mapID = strings.TrimSpace(mapID)
 		if mapID == "" {
 			continue
@@ -69,18 +70,18 @@ func main() {
 					ns.InstallPrimaryMap(cfg)
 					log.Printf("节点 [%s] 本地加载地图 %s（store 不可用，起空图）", nodeID, mapID)
 				}
-				hostedMaps = append(hostedMaps, mapID)
+				declaredPrimaryMaps = append(declaredPrimaryMaps, mapID)
 				break
 			}
 		}
 	}
 
-	replicas := strings.Split(replicasStr, ",")
-	var hostedReplicas []string
-	for _, mapID := range replicas {
+	declaredReplicaMapIDs := strings.Split(declaredReplicaMapsStr, ",")
+	var declaredReplicaMaps []string
+	for _, mapID := range declaredReplicaMapIDs {
 		mapID = strings.TrimSpace(mapID)
 		if mapID != "" {
-			hostedReplicas = append(hostedReplicas, mapID)
+			declaredReplicaMaps = append(declaredReplicaMaps, mapID)
 			ns.AddReplicaMap(mapID)
 			log.Printf("节点 [%s] 本地成功加载副本: %s", nodeID, mapID)
 		}
@@ -104,8 +105,8 @@ func main() {
 			info := storage.NodeRegistryInfo{
 				ID:       nodeID,
 				Addr:     nodeAddr,
-				Maps:     hostedMaps,
-				Replicas: hostedReplicas,
+				Maps:     declaredPrimaryMaps,
+				Replicas: declaredReplicaMaps,
 			}
 			for {
 				if err := store.RegisterNode(info, 5*time.Second); err != nil {

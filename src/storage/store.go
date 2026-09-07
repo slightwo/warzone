@@ -388,6 +388,10 @@ func verifyPassword(hash, password string) bool {
 	return hash == hex.EncodeToString(sum[:])
 }
 
+// NodeRegistryInfo 表示节点在注册中心上报的可达地址和承载候选能力。
+//
+// Maps 与 Replicas 为兼容既有 JSON 协议保留，它们分别表示声明的主地图候选和
+// 副本地图候选，不代表节点已获得地图路由主权。主从归属只能由已提交的 Topology 决定。
 type NodeRegistryInfo struct {
 	ID       string   `json:"id"`
 	Addr     string   `json:"addr"`
@@ -395,6 +399,7 @@ type NodeRegistryInfo struct {
 	Replicas []string `json:"replicas"`
 }
 
+// RegisterNode 以租约形式上报节点注册信息；该操作不会修改 Topology。
 func (s *Store) RegisterNode(info NodeRegistryInfo, ttl time.Duration) error {
 	data, err := json.Marshal(info)
 	if err != nil {
