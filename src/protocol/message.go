@@ -1,11 +1,8 @@
 package protocol
 
 import (
-	"net"
 	"sync"
 	"time"
-
-	json "github.com/goccy/go-json"
 )
 
 const (
@@ -219,37 +216,6 @@ type Message struct {
 	OK       bool        `json:"ok,omitempty"`
 	Error    string      `json:"error,omitempty"`
 	State    *WorldState `json:"state,omitempty"`
-}
-
-type Conn struct {
-	raw     net.Conn
-	encoder *json.Encoder
-	decoder *json.Decoder
-	sendMu  sync.Mutex
-}
-
-func NewConn(c net.Conn) *Conn {
-	return &Conn{
-		raw:     c,
-		encoder: json.NewEncoder(c),
-		decoder: json.NewDecoder(c),
-	}
-}
-
-func (c *Conn) Send(msg Message) error {
-	c.sendMu.Lock()
-	defer c.sendMu.Unlock()
-	return c.encoder.Encode(msg)
-}
-
-func (c *Conn) Receive() (Message, error) {
-	var msg Message
-	err := c.decoder.Decode(&msg)
-	return msg, err
-}
-
-func (c *Conn) Close() error {
-	return c.raw.Close()
 }
 
 var worldStatePool = sync.Pool{

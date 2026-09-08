@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"net"
 	"os"
+	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	"battleworld/pb"
 	"battleworld/protocol"
 )
 
@@ -28,38 +33,52 @@ func main() {
 		addr = os.Args[3]
 	}
 
-	raw, err := net.Dial("tcp", addr)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	text, err := executeAdmin(ctx, addr, action, nodeID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "连接网关失败：%v\n", err)
+		fmt.Fprintf(os.Stderr, "管理命令失败：%v\n", err)
 		os.Exit(1)
 	}
-	defer raw.Close()
+	fmt.Println(text)
+}
 
-	conn := protocol.NewConn(raw)
-	if err := conn.Send(protocol.Message{
+// executeAdmin 复用 GatewayService 的 gRPC 双向流发送单次管理请求。Gateway 会返回
+// 一条结果消息并关闭该 stream，因此管理工具不再依赖已废弃的裸 TCP/JSON 协议。
+func executeAdmin(ctx context.Context, addr, action, nodeID string) (string, error) {
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return "", fmt.Errorf("创建网关 gRPC 连接: %w", err)
+	}
+	defer conn.Close()
+
+	stream, err := pb.NewGatewayServiceClient(conn).GameStream(ctx)
+	if err != nil {
+		return "", fmt.Errorf("打开管理 stream: %w", err)
+	}
+	if err := stream.Send(&pb.Message{
 		Type:   protocol.TypeAdmin,
 		Action: action,
-		NodeID: nodeID,
+		NodeId: nodeID,
 	}); err != nil {
-		fmt.Fprintf(os.Stderr, "发送管理指令失败：%v\n", err)
-		os.Exit(1)
+		return "", fmt.Errorf("发送管理请求: %w", err)
 	}
-
-	reply, err := conn.Receive()
+	reply, err := stream.Recv()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "接收管理结果失败：%v\n", err)
-		os.Exit(1)
+		return "", fmt.Errorf("接收管理响应: %w", err)
 	}
-	if reply.Type == protocol.TypeError || !reply.OK {
-		fmt.Fprintf(os.Stderr, "管理命令失败：%s\n", reply.Error)
-		os.Exit(1)
+	if reply.Type == protocol.TypeError || !reply.Ok {
+		if reply.Error == "" {
+			return "", fmt.Errorf("网关拒绝管理请求")
+		}
+		return "", fmt.Errorf("%s", reply.Error)
 	}
-	fmt.Println(reply.Text)
+	return reply.Text, nil
 }
 
 func usage() {
 	fmt.Println("用法：")
 	fmt.Println("  go run ./cmd/admin 状态")
 	fmt.Println("  go run ./cmd/admin 状态 127.0.0.1:9310")
-	fmt.Println("  节点故障与恢复管理由 coordinator 负责，当前 gateway 管理接口仅提供状态查询")
+	fmt.Println("  该命令通过 Gateway gRPC 查询状态；节点故障与恢复管理由 coordinator 负责")
 }

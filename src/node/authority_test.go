@@ -55,6 +55,32 @@ func TestAuthorityCacheRejectsStaleEpochAndFailsClosedAfterGrace(t *testing.T) {
 	}
 }
 
+func TestEnsureOwnedMapsCreatesRuntimeForTopologyOwnerAfterRestart(t *testing.T) {
+	now := time.Date(2026, time.September, 8, 0, 0, 0, 0, time.UTC)
+	topology := storage.Topology{
+		Version:   4,
+		Owners:    map[string]string{"green": "node-c"},
+		Replicas:  map[string]string{"green": "node-a"},
+		MapEpochs: map[string]uint64{"green": 3},
+		UpdatedAt: now,
+	}
+	service := NewNodeService("node-c", "", nil)
+	service.authority.now = func() time.Time { return now }
+	if err := service.authority.refresh(fakeTopologyLoader{topology: &topology, found: true}); err != nil {
+		t.Fatalf("刷新拓扑: %v", err)
+	}
+
+	if err := service.ensureOwnedMaps(); err != nil {
+		t.Fatalf("按拓扑装载 owner 地图: %v", err)
+	}
+	service.mu.RLock()
+	instance := service.maps["green"]
+	service.mu.RUnlock()
+	if instance == nil {
+		t.Fatal("拓扑 owner 地图未创建本地运行时")
+	}
+}
+
 func TestGRPCAuthorityErrorsUseFailedPrecondition(t *testing.T) {
 	for _, err := range []error{ErrTopologyAuthorityUnavailable, ErrMapAuthorityDenied, ErrMapPromotionDenied} {
 		if got := status.Code(grpcAuthorityError(err)); got != codes.FailedPrecondition {

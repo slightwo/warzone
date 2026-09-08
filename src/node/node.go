@@ -21,7 +21,7 @@ const (
 )
 
 type NodeService struct {
-	mu               sync.RWMutex
+	mu sync.RWMutex
 	// drainMu 与所有会改变 world 的路径配合，确保 BeginDrain 等待已开始的写入结束，
 	// 并在最终 fenced checkpoint 前阻止后续写入。
 	drainMu          sync.RWMutex
@@ -113,7 +113,67 @@ func (n *NodeService) refreshTopology() error {
 	if n.store == nil {
 		return ErrTopologyAuthorityUnavailable
 	}
-	return n.authority.refresh(n.store)
+	if err := n.authority.refresh(n.store); err != nil {
+		return err
+	}
+	return n.ensureOwnedMaps()
+}
+
+// ensureOwnedMaps 在节点重启或故障切换后的拓扑刷新中，为当前已获得主权的地图恢复本地
+// 运行时。启动参数只声明候选能力；因此此前被提升为 owner 的副本节点重启后，也必须以
+// 已提交 Topology 为准重新装载地图，不能仅依赖 -maps 参数。
+func (n *NodeService) ensureOwnedMaps() error {
+	mapIDs, fresh := n.authority.OwnedMapIDs()
+	if !fresh {
+		return ErrTopologyAuthorityUnavailable
+	}
+	for _, mapID := range mapIDs {
+		if err := n.ensureHostedMap(mapID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureHostedMap 保证当前节点本地存在 mapID 的 World 实例。故障切换后重启时，Redis
+// 中可能仍保存前一 owner 写入的最近 checkpoint；它是新 owner 恢复地图状态的有效基础，
+// 新 owner 随后的 fenced checkpoint 会以自身 nodeID 和新 epoch 覆盖该快照。
+func (n *NodeService) ensureHostedMap(mapID string) error {
+	n.mu.RLock()
+	_, hosted := n.maps[mapID]
+	n.mu.RUnlock()
+	if hosted {
+		return nil
+	}
+
+	var config world.MapConfig
+	found := false
+	for _, candidate := range world.AvailableMaps() {
+		if candidate.ID == mapID {
+			config = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("未知地图 %q，无法创建本地运行时", mapID)
+	}
+
+	instance := world.NewWorld(config)
+	if n.store != nil {
+		if checkpoint, ok := n.store.LoadCheckpoint(mapID); ok && checkpoint != nil && checkpoint.MapID == mapID && checkpoint.Version > 0 {
+			instance.RestoreCheckpoint(*checkpoint)
+		}
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if _, hosted := n.maps[mapID]; hosted {
+		return nil
+	}
+	n.maps[mapID] = instance
+	log.Printf("[node/authority] 节点 %s 已按已提交拓扑装载 owner 地图 %s", n.ID, mapID)
+	return nil
 }
 
 // RequireAuthority 在所有地图状态写入进入 world 前执行 owner/epoch fencing。
@@ -343,11 +403,16 @@ func (n *NodeService) AddPlayer(ctx context.Context, mapID string, epoch uint64,
 		return err
 	}
 	defer release()
+	// Gateway 可能在本节点下一轮 topology refresh 前就依据新拓扑发来登录请求；此处
+	// 按已验证的 owner/epoch 惰性补齐地图实例，避免副本提升后的节点重启导致首次登录失败。
+	if err := n.ensureHostedMap(mapID); err != nil {
+		return fmt.Errorf("准备地图 %q: %w", mapID, err)
+	}
 	n.mu.RLock()
 	instance := n.maps[mapID]
 	n.mu.RUnlock()
 	if instance == nil {
-		return errors.New("add player：没有找到源节点")
+		return errors.New("add player：本地地图未就绪")
 	}
 	instance.AddOrRestorePlayer(profile)
 	return nil
