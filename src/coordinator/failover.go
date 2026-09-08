@@ -43,8 +43,9 @@ func (c *Coordinator) failoverNode(failedNodeID string) {
 
 // failoverMap 是固定的单图切换状态机：
 //
-//	load topology(E) -> validate owner/healthy replica/checkpoint -> Promote(E+1)
-//	-> topology+fence CAS -> repair affected sessions -> publish event.
+// load topology(E) -> validate owner/healthy replica/checkpoint -> Promote(E+1)
+// -> topology+fence CAS（旧 owner 不复用为副本）-> repair affected sessions -> publish event.
+
 //
 // Promote 仅准备副本内存地图，不授予写权限；只有 CAS 成功写入 topology/fence 后，新
 // owner 通过自己的 topology refresh 得到 E+1 主权，旧 owner 则被 Redis fence 拒绝。
@@ -93,7 +94,10 @@ func (c *Coordinator) failoverMap(mapID, failedNodeID string) error {
 	next := topology.Clone()
 	next.Version = topology.Version + 1
 	next.Owners[mapID] = replicaID
-	next.Replicas[mapID] = failedNodeID
+	// 旧 owner 要么已失效，要么正在 drain，均不能被标记为新的 warm standby。
+	// 当前一主一备模型尚未实现自动补副本，故切换后显式留下空副本位，等待后续
+	// 副本重建流程补齐，而不能伪造一个不可用的 replica。
+	next.Replicas[mapID] = ""
 	next.MapEpochs[mapID] = nextEpoch
 	next.LeaderTerm = term
 	next.UpdatedAt = time.Now().UTC()

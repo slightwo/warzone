@@ -393,6 +393,9 @@ func TestFailoverPromotesReplicaAndMigratesSessions(t *testing.T) {
 	if store.topology.Version != 8 || store.topology.Owners["green"] != "node-b" || store.topology.MapEpochs["green"] != 5 {
 		t.Fatalf("错误的故障转移拓扑: %+v", store.topology)
 	}
+	if replicaID := store.topology.Replicas["green"]; replicaID != "" {
+		t.Fatalf("故障或 drain 中的旧 owner 不得被复用为副本，replica=%q", replicaID)
+	}
 	if len(store.sessions) != 1 || store.sessions[0].NodeID != "node-b" || store.sessions[0].Version != 4 {
 		t.Fatalf("会话未原子迁移: %+v", store.sessions)
 	}
