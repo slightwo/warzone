@@ -15,9 +15,11 @@ import (
 
 type adminTestGateway struct {
 	pb.UnimplementedGatewayServiceServer
+	pb.UnimplementedAdminServiceServer
+
 	expectedAction string
-	expectedNodeID string
 	response       *pb.Message
+	status         *pb.GatewayStatusResponse
 }
 
 func (s *adminTestGateway) GameStream(stream pb.GatewayService_GameStreamServer) error {
@@ -25,17 +27,23 @@ func (s *adminTestGateway) GameStream(stream pb.GatewayService_GameStreamServer)
 	if err != nil {
 		return err
 	}
-	if request.Type != protocol.TypeAdmin || request.Action != s.expectedAction || request.NodeId != s.expectedNodeID {
+	if request.GetType() != protocol.TypeAdmin || request.GetAction() != s.expectedAction {
 		return stream.Send(&pb.Message{Type: protocol.TypeError, Error: "unexpected admin request"})
 	}
 	return stream.Send(s.response)
 }
 
-func TestExecuteAdminUsesGatewayGRPCStream(t *testing.T) {
+func (s *adminTestGateway) GetGatewayStatus(context.Context, *pb.GatewayStatusRequest) (*pb.GatewayStatusResponse, error) {
+	return s.status, nil
+}
+
+func TestExecuteAdminUsesDedicatedAdminServiceByDefault(t *testing.T) {
 	address, stop := startAdminTestGateway(t, &adminTestGateway{
-		expectedAction: "status",
-		expectedNodeID: "",
-		response:       &pb.Message{Type: protocol.TypeAdmin, Ok: true, Text: "网关路由状态：Topology Version=2"},
+		status: &pb.GatewayStatusResponse{
+			RoutingReady:    true,
+			TopologyVersion: 2,
+			Summary:         "网关路由状态：Topology Version=2",
+		},
 	})
 	defer stop()
 
@@ -50,23 +58,34 @@ func TestExecuteAdminUsesGatewayGRPCStream(t *testing.T) {
 	}
 }
 
-func TestExecuteAdminReturnsGatewayError(t *testing.T) {
+func TestExecuteAdminV1RemainsExplicitFallback(t *testing.T) {
 	address, stop := startAdminTestGateway(t, &adminTestGateway{
-		expectedAction: "down",
-		expectedNodeID: "node-a",
-		response:       &pb.Message{Type: protocol.TypeError, Error: "节点故障与恢复管理已迁入 coordinator"},
+		expectedAction: "status",
+		response:       &pb.Message{Type: protocol.TypeAdmin, Ok: true, Text: "V1 网关路由状态"},
 	})
 	defer stop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_, err := executeAdmin(ctx, address, "down", "node-a")
-	if err == nil || !strings.Contains(err.Error(), "已迁入 coordinator") {
-		t.Fatalf("管理错误 = %v，期望返回 Gateway 业务错误", err)
+	text, err := executeAdminWithVersion(ctx, address, "status", "v1")
+	if err != nil {
+		t.Fatalf("V1 回退执行失败: %v", err)
+	}
+	if text != "V1 网关路由状态" {
+		t.Fatalf("V1 管理结果 = %q", text)
 	}
 }
 
-func startAdminTestGateway(t *testing.T, gateway pb.GatewayServiceServer) (string, func()) {
+func TestExecuteAdminRejectsNonStatusActions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := executeAdminWithVersion(ctx, "unused", "down", "v2")
+	if err == nil || !strings.Contains(err.Error(), "已迁入 coordinator") {
+		t.Fatalf("管理错误 = %v，期望本地拒绝非 status 操作", err)
+	}
+}
+
+func startAdminTestGateway(t *testing.T, gateway *adminTestGateway) (string, func()) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -74,6 +93,7 @@ func startAdminTestGateway(t *testing.T, gateway pb.GatewayServiceServer) (strin
 	}
 	server := grpc.NewServer()
 	pb.RegisterGatewayServiceServer(server, gateway)
+	pb.RegisterAdminServiceServer(server, gateway)
 	go func() {
 		_ = server.Serve(listener)
 	}()
