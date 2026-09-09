@@ -19,14 +19,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	GatewayService_GameStream_FullMethodName = "/pb.GatewayService/GameStream"
+	GatewayService_GameStream_FullMethodName   = "/pb.GatewayService/GameStream"
+	GatewayService_GameStreamV2_FullMethodName = "/pb.GatewayService/GameStreamV2"
 )
 
 // GatewayServiceClient is the client API for GatewayService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// GatewayService exposes both the legacy V1 stream and the typed V2 stream during
+// migration. GameStream must remain wire compatible until all V1 callers migrate.
 type GatewayServiceClient interface {
+	// Legacy V1 stream. Do not change Message tags or this RPC name.
 	GameStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[Message, Message], error)
+	// Typed V2 stream. Each envelope has an explicit oneof payload.
+	GameStreamV2(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientEnvelope, ServerEnvelope], error)
 }
 
 type gatewayServiceClient struct {
@@ -50,11 +57,30 @@ func (c *gatewayServiceClient) GameStream(ctx context.Context, opts ...grpc.Call
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type GatewayService_GameStreamClient = grpc.BidiStreamingClient[Message, Message]
 
+func (c *gatewayServiceClient) GameStreamV2(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientEnvelope, ServerEnvelope], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &GatewayService_ServiceDesc.Streams[1], GatewayService_GameStreamV2_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ClientEnvelope, ServerEnvelope]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type GatewayService_GameStreamV2Client = grpc.BidiStreamingClient[ClientEnvelope, ServerEnvelope]
+
 // GatewayServiceServer is the server API for GatewayService service.
 // All implementations must embed UnimplementedGatewayServiceServer
 // for forward compatibility.
+//
+// GatewayService exposes both the legacy V1 stream and the typed V2 stream during
+// migration. GameStream must remain wire compatible until all V1 callers migrate.
 type GatewayServiceServer interface {
+	// Legacy V1 stream. Do not change Message tags or this RPC name.
 	GameStream(grpc.BidiStreamingServer[Message, Message]) error
+	// Typed V2 stream. Each envelope has an explicit oneof payload.
+	GameStreamV2(grpc.BidiStreamingServer[ClientEnvelope, ServerEnvelope]) error
 	mustEmbedUnimplementedGatewayServiceServer()
 }
 
@@ -67,6 +93,9 @@ type UnimplementedGatewayServiceServer struct{}
 
 func (UnimplementedGatewayServiceServer) GameStream(grpc.BidiStreamingServer[Message, Message]) error {
 	return status.Errorf(codes.Unimplemented, "method GameStream not implemented")
+}
+func (UnimplementedGatewayServiceServer) GameStreamV2(grpc.BidiStreamingServer[ClientEnvelope, ServerEnvelope]) error {
+	return status.Errorf(codes.Unimplemented, "method GameStreamV2 not implemented")
 }
 func (UnimplementedGatewayServiceServer) mustEmbedUnimplementedGatewayServiceServer() {}
 func (UnimplementedGatewayServiceServer) testEmbeddedByValue()                        {}
@@ -96,6 +125,13 @@ func _GatewayService_GameStream_Handler(srv interface{}, stream grpc.ServerStrea
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type GatewayService_GameStreamServer = grpc.BidiStreamingServer[Message, Message]
 
+func _GatewayService_GameStreamV2_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(GatewayServiceServer).GameStreamV2(&grpc.GenericServerStream[ClientEnvelope, ServerEnvelope]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type GatewayService_GameStreamV2Server = grpc.BidiStreamingServer[ClientEnvelope, ServerEnvelope]
+
 // GatewayService_ServiceDesc is the grpc.ServiceDesc for GatewayService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -110,7 +146,121 @@ var GatewayService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 			ClientStreams: true,
 		},
+		{
+			StreamName:    "GameStreamV2",
+			Handler:       _GatewayService_GameStreamV2_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
 	},
+	Metadata: "pb/battle.proto",
+}
+
+const (
+	AdminService_GetGatewayStatus_FullMethodName = "/pb.AdminService/GetGatewayStatus"
+)
+
+// AdminServiceClient is the client API for AdminService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// AdminService is intentionally separate from player streams. It can evolve its
+// authorization independently and never needs a synthetic player authentication frame.
+type AdminServiceClient interface {
+	GetGatewayStatus(ctx context.Context, in *GatewayStatusRequest, opts ...grpc.CallOption) (*GatewayStatusResponse, error)
+}
+
+type adminServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewAdminServiceClient(cc grpc.ClientConnInterface) AdminServiceClient {
+	return &adminServiceClient{cc}
+}
+
+func (c *adminServiceClient) GetGatewayStatus(ctx context.Context, in *GatewayStatusRequest, opts ...grpc.CallOption) (*GatewayStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GatewayStatusResponse)
+	err := c.cc.Invoke(ctx, AdminService_GetGatewayStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AdminServiceServer is the server API for AdminService service.
+// All implementations must embed UnimplementedAdminServiceServer
+// for forward compatibility.
+//
+// AdminService is intentionally separate from player streams. It can evolve its
+// authorization independently and never needs a synthetic player authentication frame.
+type AdminServiceServer interface {
+	GetGatewayStatus(context.Context, *GatewayStatusRequest) (*GatewayStatusResponse, error)
+	mustEmbedUnimplementedAdminServiceServer()
+}
+
+// UnimplementedAdminServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedAdminServiceServer struct{}
+
+func (UnimplementedAdminServiceServer) GetGatewayStatus(context.Context, *GatewayStatusRequest) (*GatewayStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetGatewayStatus not implemented")
+}
+func (UnimplementedAdminServiceServer) mustEmbedUnimplementedAdminServiceServer() {}
+func (UnimplementedAdminServiceServer) testEmbeddedByValue()                      {}
+
+// UnsafeAdminServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to AdminServiceServer will
+// result in compilation errors.
+type UnsafeAdminServiceServer interface {
+	mustEmbedUnimplementedAdminServiceServer()
+}
+
+func RegisterAdminServiceServer(s grpc.ServiceRegistrar, srv AdminServiceServer) {
+	// If the following call pancis, it indicates UnimplementedAdminServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&AdminService_ServiceDesc, srv)
+}
+
+func _AdminService_GetGatewayStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GatewayStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).GetGatewayStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_GetGatewayStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).GetGatewayStatus(ctx, req.(*GatewayStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// AdminService_ServiceDesc is the grpc.ServiceDesc for AdminService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var AdminService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "pb.AdminService",
+	HandlerType: (*AdminServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetGatewayStatus",
+			Handler:    _AdminService_GetGatewayStatus_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
 	Metadata: "pb/battle.proto",
 }
 

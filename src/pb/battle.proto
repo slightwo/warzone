@@ -120,8 +120,151 @@ message Message {
     WorldState state = 13;
 }
 
+// GatewayService exposes both the legacy V1 stream and the typed V2 stream during
+// migration. GameStream must remain wire compatible until all V1 callers migrate.
 service GatewayService {
+    // Legacy V1 stream. Do not change Message tags or this RPC name.
     rpc GameStream(stream Message) returns (stream Message);
+    // Typed V2 stream. Each envelope has an explicit oneof payload.
+    rpc GameStreamV2(stream ClientEnvelope) returns (stream ServerEnvelope);
+}
+
+// Direction is deliberately closed at the Gateway boundary. UNSPECIFIED and unknown
+// numeric values are invalid client input and must be rejected by the V2 handler.
+enum Direction {
+    DIRECTION_UNSPECIFIED = 0;
+    DIRECTION_UP = 1;
+    DIRECTION_DOWN = 2;
+    DIRECTION_LEFT = 3;
+    DIRECTION_RIGHT = 4;
+}
+
+// ErrorCode is stable client-facing error taxonomy. Clients must branch on code rather
+// than parsing ErrorResponse.message. New values are append-only.
+enum ErrorCode {
+    ERROR_CODE_UNSPECIFIED = 0;
+    ERROR_CODE_INVALID_REQUEST = 1;
+    ERROR_CODE_AUTH_FAILED = 2;
+    ERROR_CODE_ROUTE_NOT_READY = 3;
+    ERROR_CODE_STALE_ROUTE = 4;
+    ERROR_CODE_COMMAND_REJECTED = 5;
+    ERROR_CODE_INTERNAL = 6;
+}
+
+// ClientEnvelope carries exactly one authentication request or player command.
+// request_id must be non-zero and unique among a live client's outstanding requests.
+// An empty payload, an unknown enum value, or a command before authentication is an
+// INVALID_REQUEST in the V2 handler.
+message ClientEnvelope {
+    uint64 request_id = 1;
+
+    oneof payload {
+        LoginRequest login = 10;
+        RegisterRequest register = 11;
+        QuickEnterRequest quick_enter = 12;
+
+        MoveCommand move = 20;
+        AttackCommand attack = 21;
+        AttackBossCommand attack_boss = 22;
+        HealCommand heal = 23;
+        BuyItemCommand buy_item = 24;
+        SwitchMapCommand switch_map = 25;
+        LogoutCommand logout = 26;
+    }
+}
+
+// LoginRequest is the initial credential exchange for an existing player. V2 terminal
+// APIs intentionally never expose a password_hash field.
+message LoginRequest {
+    string username = 1;
+    string password = 2;
+}
+
+// RegisterRequest creates a player and immediately authenticates that player.
+message RegisterRequest {
+    string username = 1;
+    string password = 2;
+    string confirm_password = 3;
+}
+
+// QuickEnterRequest creates the player when absent, then authenticates it.
+message QuickEnterRequest {
+    string username = 1;
+    string password = 2;
+}
+
+message MoveCommand {
+    Direction direction = 1;
+}
+
+message AttackCommand {}
+
+message AttackBossCommand {}
+
+message HealCommand {}
+
+message BuyItemCommand {
+    string item = 1;
+}
+
+message SwitchMapCommand {
+    string map_id = 1;
+}
+
+message LogoutCommand {}
+
+// ServerEnvelope is written by a single V2 stream writer. Authentication outcomes,
+// command outcomes, errors, and notices are reliable control messages. State updates
+// are mergeable: an implementation may replace queued state with the latest snapshot.
+message ServerEnvelope {
+    // Echoes the triggering ClientEnvelope.request_id for auth, command results, and
+    // errors. Proactive state updates always use request_id = 0.
+    uint64 request_id = 1;
+
+    oneof payload {
+        Authenticated authenticated = 10;
+        CommandResult command_result = 20;
+        // Clients may coalesce states, but must never replace a newer same-map state
+        // with one whose topology_version, map_epoch, or session_version regresses.
+        WorldState state = 30;
+        ErrorResponse error = 40;
+        ServerNotice notice = 50;
+    }
+}
+
+message Authenticated {
+    WorldState state = 1;
+}
+
+// CommandResult confirms that a command was accepted. Its request_id is carried by the
+// enclosing ServerEnvelope; a corresponding state update is delivered separately.
+message CommandResult {
+    string message = 1;
+}
+
+message ErrorResponse {
+    ErrorCode code = 1;
+    string message = 2;
+    bool retryable = 3;
+}
+
+message ServerNotice {
+    string message = 1;
+}
+
+// AdminService is intentionally separate from player streams. It can evolve its
+// authorization independently and never needs a synthetic player authentication frame.
+service AdminService {
+    rpc GetGatewayStatus(GatewayStatusRequest) returns (GatewayStatusResponse);
+}
+
+message GatewayStatusRequest {}
+
+message GatewayStatusResponse {
+    bool routing_ready = 1;
+    uint64 topology_version = 2;
+    repeated NodeView nodes = 3;
+    string summary = 4;
 }
 
 message UserProfile {
