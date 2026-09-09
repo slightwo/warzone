@@ -115,23 +115,21 @@ var GatewayService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	NodeService_Ping_FullMethodName           = "/pb.NodeService/Ping"
-	NodeService_AddPlayer_FullMethodName      = "/pb.NodeService/AddPlayer"
-	NodeService_RemovePlayer_FullMethodName   = "/pb.NodeService/RemovePlayer"
-	NodeService_MovePlayer_FullMethodName     = "/pb.NodeService/MovePlayer"
-	NodeService_Attack_FullMethodName         = "/pb.NodeService/Attack"
-	NodeService_Heal_FullMethodName           = "/pb.NodeService/Heal"
-	NodeService_BuyItem_FullMethodName        = "/pb.NodeService/BuyItem"
-	NodeService_Profile_FullMethodName        = "/pb.NodeService/Profile"
-	NodeService_RewardPlayer_FullMethodName   = "/pb.NodeService/RewardPlayer"
-	NodeService_Snapshot_FullMethodName       = "/pb.NodeService/Snapshot"
-	NodeService_Counts_FullMethodName         = "/pb.NodeService/Counts"
-	NodeService_Checkpoint_FullMethodName     = "/pb.NodeService/Checkpoint"
-	NodeService_BackgroundStep_FullMethodName = "/pb.NodeService/BackgroundStep"
-	NodeService_AttackBoss_FullMethodName     = "/pb.NodeService/AttackBoss"
-	NodeService_StoreReplica_FullMethodName   = "/pb.NodeService/StoreReplica"
-	NodeService_Promote_FullMethodName        = "/pb.NodeService/Promote"
-	NodeService_View_FullMethodName           = "/pb.NodeService/View"
+	NodeService_Ping_FullMethodName         = "/pb.NodeService/Ping"
+	NodeService_AddPlayer_FullMethodName    = "/pb.NodeService/AddPlayer"
+	NodeService_RemovePlayer_FullMethodName = "/pb.NodeService/RemovePlayer"
+	NodeService_MovePlayer_FullMethodName   = "/pb.NodeService/MovePlayer"
+	NodeService_Attack_FullMethodName       = "/pb.NodeService/Attack"
+	NodeService_Heal_FullMethodName         = "/pb.NodeService/Heal"
+	NodeService_BuyItem_FullMethodName      = "/pb.NodeService/BuyItem"
+	NodeService_Profile_FullMethodName      = "/pb.NodeService/Profile"
+	NodeService_RewardPlayer_FullMethodName = "/pb.NodeService/RewardPlayer"
+	NodeService_Snapshot_FullMethodName     = "/pb.NodeService/Snapshot"
+	NodeService_Counts_FullMethodName       = "/pb.NodeService/Counts"
+	NodeService_Checkpoint_FullMethodName   = "/pb.NodeService/Checkpoint"
+	NodeService_AttackBoss_FullMethodName   = "/pb.NodeService/AttackBoss"
+	NodeService_Promote_FullMethodName      = "/pb.NodeService/Promote"
+	NodeService_View_FullMethodName         = "/pb.NodeService/View"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -150,9 +148,7 @@ type NodeServiceClient interface {
 	Snapshot(ctx context.Context, in *SnapshotReq, opts ...grpc.CallOption) (*SnapshotResp, error)
 	Counts(ctx context.Context, in *CountsReq, opts ...grpc.CallOption) (*CountsResp, error)
 	Checkpoint(ctx context.Context, in *CheckpointReq, opts ...grpc.CallOption) (*CheckpointResp, error)
-	BackgroundStep(ctx context.Context, in *BackgroundStepReq, opts ...grpc.CallOption) (*BackgroundStepResp, error)
 	AttackBoss(ctx context.Context, in *AttackBossReq, opts ...grpc.CallOption) (*AttackBossResp, error)
-	StoreReplica(ctx context.Context, in *StoreReplicaReq, opts ...grpc.CallOption) (*StoreReplicaResp, error)
 	Promote(ctx context.Context, in *PromoteReq, opts ...grpc.CallOption) (*PromoteResp, error)
 	View(ctx context.Context, in *ViewReq, opts ...grpc.CallOption) (*ViewResp, error)
 }
@@ -285,30 +281,10 @@ func (c *nodeServiceClient) Checkpoint(ctx context.Context, in *CheckpointReq, o
 	return out, nil
 }
 
-func (c *nodeServiceClient) BackgroundStep(ctx context.Context, in *BackgroundStepReq, opts ...grpc.CallOption) (*BackgroundStepResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(BackgroundStepResp)
-	err := c.cc.Invoke(ctx, NodeService_BackgroundStep_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *nodeServiceClient) AttackBoss(ctx context.Context, in *AttackBossReq, opts ...grpc.CallOption) (*AttackBossResp, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AttackBossResp)
 	err := c.cc.Invoke(ctx, NodeService_AttackBoss_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) StoreReplica(ctx context.Context, in *StoreReplicaReq, opts ...grpc.CallOption) (*StoreReplicaResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StoreReplicaResp)
-	err := c.cc.Invoke(ctx, NodeService_StoreReplica_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -351,9 +327,7 @@ type NodeServiceServer interface {
 	Snapshot(context.Context, *SnapshotReq) (*SnapshotResp, error)
 	Counts(context.Context, *CountsReq) (*CountsResp, error)
 	Checkpoint(context.Context, *CheckpointReq) (*CheckpointResp, error)
-	BackgroundStep(context.Context, *BackgroundStepReq) (*BackgroundStepResp, error)
 	AttackBoss(context.Context, *AttackBossReq) (*AttackBossResp, error)
-	StoreReplica(context.Context, *StoreReplicaReq) (*StoreReplicaResp, error)
 	Promote(context.Context, *PromoteReq) (*PromoteResp, error)
 	View(context.Context, *ViewReq) (*ViewResp, error)
 	mustEmbedUnimplementedNodeServiceServer()
@@ -402,14 +376,8 @@ func (UnimplementedNodeServiceServer) Counts(context.Context, *CountsReq) (*Coun
 func (UnimplementedNodeServiceServer) Checkpoint(context.Context, *CheckpointReq) (*CheckpointResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Checkpoint not implemented")
 }
-func (UnimplementedNodeServiceServer) BackgroundStep(context.Context, *BackgroundStepReq) (*BackgroundStepResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method BackgroundStep not implemented")
-}
 func (UnimplementedNodeServiceServer) AttackBoss(context.Context, *AttackBossReq) (*AttackBossResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AttackBoss not implemented")
-}
-func (UnimplementedNodeServiceServer) StoreReplica(context.Context, *StoreReplicaReq) (*StoreReplicaResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method StoreReplica not implemented")
 }
 func (UnimplementedNodeServiceServer) Promote(context.Context, *PromoteReq) (*PromoteResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Promote not implemented")
@@ -654,24 +622,6 @@ func _NodeService_Checkpoint_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
-func _NodeService_BackgroundStep_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BackgroundStepReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).BackgroundStep(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_BackgroundStep_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).BackgroundStep(ctx, req.(*BackgroundStepReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _NodeService_AttackBoss_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AttackBossReq)
 	if err := dec(in); err != nil {
@@ -686,24 +636,6 @@ func _NodeService_AttackBoss_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(NodeServiceServer).AttackBoss(ctx, req.(*AttackBossReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_StoreReplica_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StoreReplicaReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).StoreReplica(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_StoreReplica_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).StoreReplica(ctx, req.(*StoreReplicaReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -800,16 +732,8 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _NodeService_Checkpoint_Handler,
 		},
 		{
-			MethodName: "BackgroundStep",
-			Handler:    _NodeService_BackgroundStep_Handler,
-		},
-		{
 			MethodName: "AttackBoss",
 			Handler:    _NodeService_AttackBoss_Handler,
-		},
-		{
-			MethodName: "StoreReplica",
-			Handler:    _NodeService_StoreReplica_Handler,
 		},
 		{
 			MethodName: "Promote",

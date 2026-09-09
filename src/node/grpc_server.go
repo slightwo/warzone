@@ -165,20 +165,6 @@ func (s *NodeGRPCServer) Checkpoint(ctx context.Context, req *pb.CheckpointReq) 
 	}, nil
 }
 
-func (s *NodeGRPCServer) BackgroundStep(ctx context.Context, req *pb.BackgroundStepReq) (*pb.BackgroundStepResp, error) {
-	events, err := s.svc.BackgroundStep(req.MapId, req.MapEpoch)
-	if err != nil {
-		return nil, grpcAuthorityError(err)
-	}
-	return &pb.BackgroundStepResp{Events: []*pb.MapEvents{{MapId: req.MapId, Events: events}}}, nil
-}
-
-func (s *NodeGRPCServer) StoreReplica(ctx context.Context, req *pb.StoreReplicaReq) (*pb.StoreReplicaResp, error) {
-	cp := protocol.FromProtoMapCheckpoint(req.Checkpoint)
-	s.svc.StoreReplica(cp)
-	return &pb.StoreReplicaResp{Ok: true}, nil
-}
-
 func (s *NodeGRPCServer) Promote(ctx context.Context, req *pb.PromoteReq) (*pb.PromoteResp, error) {
 	available := world.AvailableMaps()
 	var cfg world.MapConfig

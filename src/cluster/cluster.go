@@ -423,8 +423,15 @@ func (c *Cluster) SnapshotFor(username string) (*protocol.WorldState, error) {
 	}
 	sessionVersion := session.Version
 
+	c.mu.RLock()
+	topologyVersion := c.topology.Version
+	mapEpoch := c.topology.MapEpochs[session.MapID]
+	c.mu.RUnlock()
+
 	ws := protocol.AllocWorldState()
 	ws.SessionVersion = sessionVersion
+	ws.TopologyVersion = topologyVersion
+	ws.MapEpoch = mapEpoch
 
 	c.eventMu.RLock()
 	ws.Events = ws.Events[:0]

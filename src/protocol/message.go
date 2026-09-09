@@ -151,13 +151,15 @@ type BossView struct {
 }
 
 type WorldState struct {
-	Self           PlayerView `json:"self"`
-	Map            MapView    `json:"map"`
-	Maps           []MapBrief `json:"maps"`
-	Nodes          []NodeView `json:"nodes"`
-	Boss           BossView   `json:"boss"`
-	Events         []string   `json:"events"`
-	SessionVersion int64      `json:"session_version"`
+	Self            PlayerView `json:"self"`
+	Map             MapView    `json:"map"`
+	Maps            []MapBrief `json:"maps"`
+	Nodes           []NodeView `json:"nodes"`
+	Boss            BossView   `json:"boss"`
+	Events          []string   `json:"events"`
+	SessionVersion  int64      `json:"session_version"`
+	TopologyVersion uint64     `json:"topology_version"`
+	MapEpoch        uint64     `json:"map_epoch"`
 }
 
 type UserProfile struct {
@@ -252,5 +254,7 @@ func FreeWorldState(ws *WorldState) {
 	ws.Boss.RespawnIn, ws.Boss.AttackGap = 0, 0
 	ws.Boss.Version = 0
 	ws.SessionVersion = 0
+	ws.TopologyVersion = 0
+	ws.MapEpoch = 0
 	worldStatePool.Put(ws)
 }

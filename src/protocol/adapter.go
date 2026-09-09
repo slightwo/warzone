@@ -266,11 +266,13 @@ func ToProtoWorldState(w *WorldState) *pb.WorldState {
 		return nil
 	}
 	res := &pb.WorldState{
-		Self:           ToProtoPlayerView(w.Self),
-		Map:            ToProtoMapView(w.Map),
-		Boss:           ToProtoBossView(w.Boss),
-		Events:         w.Events,
-		SessionVersion: w.SessionVersion,
+		Self:            ToProtoPlayerView(w.Self),
+		Map:             ToProtoMapView(w.Map),
+		Boss:            ToProtoBossView(w.Boss),
+		Events:          w.Events,
+		SessionVersion:  w.SessionVersion,
+		TopologyVersion: w.TopologyVersion,
+		MapEpoch:        w.MapEpoch,
 	}
 	for _, m := range w.Maps {
 		res.Maps = append(res.Maps, ToProtoMapBrief(m))
@@ -286,11 +288,13 @@ func FromProtoWorldState(w *pb.WorldState) *WorldState {
 		return nil
 	}
 	res := &WorldState{
-		Self:           FromProtoPlayerView(w.Self),
-		Map:            FromProtoMapView(w.Map),
-		Boss:           FromProtoBossView(w.Boss),
-		Events:         w.Events,
-		SessionVersion: w.SessionVersion,
+		Self:            FromProtoPlayerView(w.Self),
+		Map:             FromProtoMapView(w.Map),
+		Boss:            FromProtoBossView(w.Boss),
+		Events:          w.Events,
+		SessionVersion:  w.SessionVersion,
+		TopologyVersion: w.TopologyVersion,
+		MapEpoch:        w.MapEpoch,
 	}
 	for _, m := range w.Maps {
 		res.Maps = append(res.Maps, FromProtoMapBrief(m))

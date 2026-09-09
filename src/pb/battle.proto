@@ -93,13 +93,15 @@ message BossView {
 }
 
 message WorldState {
-    PlayerView self = 1;
-    MapView map = 2;
-    repeated MapBrief maps = 3;
-    repeated NodeView nodes = 4;
-    BossView boss = 5;
-    repeated string events = 6;
-    int64 session_version = 7;
+PlayerView self = 1;
+MapView map = 2;
+repeated MapBrief maps = 3;
+repeated NodeView nodes = 4;
+BossView boss = 5;
+repeated string events = 6;
+int64 session_version = 7;
+uint64 topology_version = 8;
+uint64 map_epoch = 9;
 }
 
 message Message {
@@ -209,9 +211,7 @@ service NodeService {
     rpc Snapshot(SnapshotReq) returns (SnapshotResp);
     rpc Counts(CountsReq) returns (CountsResp);
     rpc Checkpoint(CheckpointReq) returns (CheckpointResp);
-    rpc BackgroundStep(BackgroundStepReq) returns (BackgroundStepResp);
     rpc AttackBoss(AttackBossReq) returns (AttackBossResp);
-    rpc StoreReplica(StoreReplicaReq) returns (StoreReplicaResp);
     rpc Promote(PromoteReq) returns (PromoteResp);
     rpc View(ViewReq) returns (ViewResp);
 }
@@ -226,20 +226,6 @@ message AttackBossResp {
     string text = 1;
     UserProfile profile = 2;
     bool ok = 3;
-}
-
-message BackgroundStepReq {
-    string map_id = 1;
-    uint64 map_epoch = 2;
-}
-
-message BackgroundStepResp {
-    repeated MapEvents events = 1;
-}
-
-message MapEvents {
-    string map_id = 1;
-    repeated string events = 2;
 }
 
 message HealReq {
@@ -327,14 +313,6 @@ message MapCheckpoint {
     repeated TreasureView treasures = 7;
     string checkpoint = 8;
     uint64 map_epoch = 9;
-}
-
-message StoreReplicaReq {
-    MapCheckpoint checkpoint = 1;
-}
-
-message StoreReplicaResp {
-    bool ok = 1;
 }
 
 message PromoteReq {

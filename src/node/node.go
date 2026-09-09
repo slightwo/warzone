@@ -642,27 +642,6 @@ func (n *NodeService) Checkpoint(ctx context.Context, mapID string) (protocol.Ma
 	return checkpoint, nil
 }
 
-func (n *NodeService) BackgroundStep(mapID string, epoch uint64) ([]string, error) {
-	release, err := n.beginWrite(mapID, epoch)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	n.mu.RLock()
-	instance := n.maps[mapID]
-	n.mu.RUnlock()
-	if instance == nil {
-		return nil, fmt.Errorf("地图 %q 当前不在节点 %s 上", mapID, n.ID)
-	}
-	return instance.BackgroundStep(), nil
-}
-
-func (n *NodeService) StoreReplica(cp protocol.MapCheckpoint) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.replicaSnapshots[cp.MapID] = cp
-}
-
 func (n *NodeService) Promote(mapID string, cfg world.MapConfig, checkpoint protocol.MapCheckpoint, targetEpoch uint64) error {
 	if err := n.RequirePromotionCandidate(mapID, targetEpoch); err != nil {
 		return err
