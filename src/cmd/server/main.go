@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	_ "expvar"
 	"flag"
 	"fmt"
 	"net"
@@ -22,12 +23,40 @@ import (
 	"battleworld/protocol"
 	"battleworld/storage"
 
-	_ "net/http/pprof"
+	_ "net/http/pprof" // 注册 /debug/pprof/ 性能分析端点。
 )
+
+const defaultGameStreamStateInterval = 100 * time.Millisecond
+
+// gatewayBackend 是 GatewayService 在 V1 游戏流中依赖的最小业务能力集合。
+// 保持传输 handler 与具体 Cluster 实现解耦，使协议行为可在不依赖 Redis 或 PostgreSQL 的
+// 情况下被表征测试覆盖。
+type gatewayBackend interface {
+	ExecuteAdmin(action, nodeID string) (string, error)
+	Register(username, password, confirm string) error
+	Login(username, password string) (*protocol.WorldState, error)
+	QuickEnter(username, password string) (*protocol.WorldState, error)
+	Logout(username string) error
+	SnapshotFor(username string) (*protocol.WorldState, error)
+	Move(username, dir string) (*protocol.WorldState, error)
+	Attack(username string) (*protocol.WorldState, error)
+	AttackBoss(username string) (*protocol.WorldState, error)
+	Heal(username string) (*protocol.WorldState, error)
+	BuyItem(username, item string) (*protocol.WorldState, error)
+	SwitchMap(username, mapID string) (*protocol.WorldState, error)
+}
 
 type GatewayServer struct {
 	pb.UnimplementedGatewayServiceServer
-	gameCluster *cluster.Cluster
+	gameCluster   gatewayBackend
+	stateInterval time.Duration
+}
+
+func (s *GatewayServer) gameStreamStateInterval() time.Duration {
+	if s.stateInterval > 0 {
+		return s.stateInterval
+	}
+	return defaultGameStreamStateInterval
 }
 
 func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) error {
@@ -109,7 +138,7 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 		}
 	}()
 
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(s.gameStreamStateInterval())
 	defer ticker.Stop()
 
 	// 心跳/状态推送协程
@@ -174,7 +203,7 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 
 		if next != nil {
 			// 策略一：应用层防抖，只执行业务逻辑，不立即返回全量状态
-			// 状态的下发统一交给上面 200ms 的 Ticker 批量处理，大幅降低 syscall 发包频次
+			// 状态的下发统一交给上面 100ms 的 ticker 批量处理，降低 syscall 发包频次
 			protocol.FreeWorldState(next)
 		}
 	}

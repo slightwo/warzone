@@ -232,9 +232,13 @@ func printMetrics(actualDuration time.Duration) {
 	}
 
 	avgLatency := totalLatency / time.Duration(len(copiedLats))
-	sort.Slice(copiedLats, func(i, j int) bool { return copiedLats[i] < copiedLats[j] })
-	p95 := copiedLats[int(float64(len(copiedLats))*0.95)]
-	p99 := copiedLats[int(float64(len(copiedLats))*0.99)]
+	percentile := func(p float64) time.Duration {
+		index := int(float64(len(copiedLats)-1) * p)
+		return copiedLats[index]
+	}
+	p50 := percentile(0.50)
+	p95 := percentile(0.95)
+	p99 := percentile(0.99)
 
 	qps := float64(successCount) / actualDuration.Seconds()
 	errRate := float64(errorCount) / float64(successCount+errorCount) * 100
@@ -243,6 +247,7 @@ func printMetrics(actualDuration time.Duration) {
 	fmt.Printf("成功请求数:     %d\n", successCount)
 	fmt.Printf("失败请求数:     %d\n", errorCount)
 	fmt.Printf("平均响应时间:   %v\n", avgLatency)
+	fmt.Printf("50%% 响应时间:   %v\n", p50)
 	fmt.Printf("95%% 响应时间:   %v\n", p95)
 	fmt.Printf("99%% 响应时间:   %v\n", p99)
 	fmt.Printf("吞吐量(QPS):    %.2f req/s\n", qps)
