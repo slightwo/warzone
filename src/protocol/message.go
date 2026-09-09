@@ -110,6 +110,15 @@ type NodeView struct {
 	LastHeartbeat string   `json:"last_heartbeat"`
 }
 
+// GatewayStatus 是 Gateway 对已提交拓扑和数据面连接的只读视图。Healthy 只表示
+// Gateway 已建立对应 owner 的数据面客户端，实际节点健康由 coordinator 管理。
+type GatewayStatus struct {
+	Summary         string     `json:"summary"`
+	RoutingReady    bool       `json:"routing_ready"`
+	TopologyVersion uint64     `json:"topology_version"`
+	Nodes           []NodeView `json:"nodes"`
+}
+
 type MapView struct {
 	ID        string         `json:"id"`
 	Name      string         `json:"name"`

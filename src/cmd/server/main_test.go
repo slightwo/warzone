@@ -123,6 +123,22 @@ func (b *fakeGatewayBackend) SwitchMap(_, _ string) (*protocol.WorldState, error
 	return testWorldState(), nil
 }
 
+func (b *fakeGatewayBackend) GatewayStatus() protocol.GatewayStatus {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return protocol.GatewayStatus{
+		Summary:         b.adminText,
+		RoutingReady:    true,
+		TopologyVersion: 2,
+		Nodes: []protocol.NodeView{{
+			ID:          "node-a",
+			Addr:        "127.0.0.1:9311",
+			Healthy:     true,
+			PrimaryMaps: []string{"green"},
+		}},
+	}
+}
+
 func (b *fakeGatewayBackend) calls() (logout, move, snapshot int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -288,13 +304,37 @@ func TestGameStreamAdminStatusUsesSingleRequestStream(t *testing.T) {
 
 func newGatewayTestStream(t *testing.T, backend gatewayBackend) (pb.GatewayService_GameStreamClient, func()) {
 	t.Helper()
+	ctx, gatewayClient, _, closeClient := newGatewayTestClients(t, backend)
+	stream, err := gatewayClient.GameStream(ctx)
+	if err != nil {
+		closeClient()
+		t.Fatalf("打开测试游戏流: %v", err)
+	}
+	return stream, closeClient
+}
+
+func newGatewayV2TestStream(t *testing.T, backend gatewayBackend) (pb.GatewayService_GameStreamV2Client, func()) {
+	t.Helper()
+	ctx, gatewayClient, _, closeClient := newGatewayTestClients(t, backend)
+	stream, err := gatewayClient.GameStreamV2(ctx)
+	if err != nil {
+		closeClient()
+		t.Fatalf("打开 V2 测试游戏流: %v", err)
+	}
+	return stream, closeClient
+}
+
+func newGatewayTestClients(t *testing.T, backend gatewayBackend) (context.Context, pb.GatewayServiceClient, pb.AdminServiceClient, func()) {
+	t.Helper()
 
 	listener := bufconn.Listen(gatewayTestBufferSize)
 	server := grpc.NewServer()
-	pb.RegisterGatewayServiceServer(server, &GatewayServer{
+	gateway := &GatewayServer{
 		gameCluster:   backend,
 		stateInterval: 10 * time.Millisecond,
-	})
+	}
+	pb.RegisterGatewayServiceServer(server, gateway)
+	pb.RegisterAdminServiceServer(server, gateway)
 	go func() {
 		_ = server.Serve(listener)
 	}()
@@ -314,16 +354,7 @@ func newGatewayTestStream(t *testing.T, backend gatewayBackend) (pb.GatewayServi
 		t.Fatalf("创建测试 gRPC 客户端: %v", err)
 	}
 
-	stream, err := pb.NewGatewayServiceClient(conn).GameStream(ctx)
-	if err != nil {
-		cancel()
-		_ = conn.Close()
-		server.Stop()
-		_ = listener.Close()
-		t.Fatalf("打开测试游戏流: %v", err)
-	}
-
-	return stream, func() {
+	return ctx, pb.NewGatewayServiceClient(conn), pb.NewAdminServiceClient(conn), func() {
 		cancel()
 		_ = conn.Close()
 		server.Stop()

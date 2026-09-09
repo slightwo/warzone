@@ -138,8 +138,8 @@ func ToProtoNodeView(n NodeView) *pb.NodeView {
 		Id:            n.ID,
 		Addr:          n.Addr,
 		Healthy:       n.Healthy,
-		PrimaryMaps:   n.PrimaryMaps,
-		ReplicaMaps:   n.ReplicaMaps,
+		PrimaryMaps:   append([]string(nil), n.PrimaryMaps...),
+		ReplicaMaps:   append([]string(nil), n.ReplicaMaps...),
 		LastHeartbeat: n.LastHeartbeat,
 	}
 }
@@ -165,7 +165,7 @@ func ToProtoMapView(m MapView) *pb.MapView {
 		NodeId:  m.NodeID,
 		Width:   int32(m.Width),
 		Height:  int32(m.Height),
-		Terrain: m.Terrain,
+		Terrain: append([]string(nil), m.Terrain...),
 		Version: m.Version,
 	}
 	for _, p := range m.Players {
@@ -269,7 +269,7 @@ func ToProtoWorldState(w *WorldState) *pb.WorldState {
 		Self:            ToProtoPlayerView(w.Self),
 		Map:             ToProtoMapView(w.Map),
 		Boss:            ToProtoBossView(w.Boss),
-		Events:          w.Events,
+		Events:          append([]string(nil), w.Events...),
 		SessionVersion:  w.SessionVersion,
 		TopologyVersion: w.TopologyVersion,
 		MapEpoch:        w.MapEpoch,
@@ -396,7 +396,7 @@ func ToProtoMapCheckpoint(c MapCheckpoint) *pb.MapCheckpoint {
 		NodeId:     c.NodeID,
 		MapEpoch:   c.MapEpoch,
 		Version:    c.Version,
-		Terrain:    c.Terrain,
+		Terrain:    append([]string(nil), c.Terrain...),
 		Checkpoint: c.Checkpoint.Format(time.RFC3339),
 	}
 	for _, p := range c.Players {

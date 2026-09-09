@@ -44,10 +44,12 @@ type gatewayBackend interface {
 	Heal(username string) (*protocol.WorldState, error)
 	BuyItem(username, item string) (*protocol.WorldState, error)
 	SwitchMap(username, mapID string) (*protocol.WorldState, error)
+	GatewayStatus() protocol.GatewayStatus
 }
 
 type GatewayServer struct {
 	pb.UnimplementedGatewayServiceServer
+	pb.UnimplementedAdminServiceServer
 	gameCluster   gatewayBackend
 	stateInterval time.Duration
 }
@@ -246,9 +248,9 @@ func main() {
 	defer ln.Close()
 
 	grpcServer := grpc.NewServer()
-	pb.RegisterGatewayServiceServer(grpcServer, &GatewayServer{
-		gameCluster: gameCluster,
-	})
+	gatewayServer := &GatewayServer{gameCluster: gameCluster}
+	pb.RegisterGatewayServiceServer(grpcServer, gatewayServer)
+	pb.RegisterAdminServiceServer(grpcServer, gatewayServer)
 
 	// draining 标志在 drain 期间返回 503，让调度器停止把新会话路由到本网关。
 	var draining atomic.Bool

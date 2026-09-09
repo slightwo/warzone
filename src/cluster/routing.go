@@ -159,20 +159,33 @@ func (c *Cluster) gatewayNodeViewsLocked() []protocol.NodeView {
 	return views
 }
 
-func (c *Cluster) adminStatus() string {
+// GatewayStatus 返回已提交拓扑和 Gateway 数据面连接的结构化只读视图。
+func (c *Cluster) GatewayStatus() protocol.GatewayStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if !c.topologyLoaded {
-		return "网关路由尚未就绪：等待 coordinator 提交 Topology"
+
+	status := protocol.GatewayStatus{
+		RoutingReady:    c.topologyLoaded,
+		TopologyVersion: c.topology.Version,
+	}
+	if !status.RoutingReady {
+		status.Summary = "网关路由尚未就绪：等待 coordinator 提交 Topology"
+		return status
 	}
 
-	lines := []string{fmt.Sprintf("网关路由状态：Topology Version=%d", c.topology.Version)}
-	for _, view := range c.gatewayNodeViewsLocked() {
-		status := "等待节点注册"
+	status.Nodes = c.gatewayNodeViewsLocked()
+	lines := []string{fmt.Sprintf("网关路由状态：Topology Version=%d", status.TopologyVersion)}
+	for _, view := range status.Nodes {
+		nodeStatus := "等待节点注册"
 		if view.Healthy {
-			status = "数据面已连接"
+			nodeStatus = "数据面已连接"
 		}
-		lines = append(lines, fmt.Sprintf("- %s %s 主分片=%v 副本=%v", view.ID, status, view.PrimaryMaps, view.ReplicaMaps))
+		lines = append(lines, fmt.Sprintf("- %s %s 主分片=%v 副本=%v", view.ID, nodeStatus, view.PrimaryMaps, view.ReplicaMaps))
 	}
-	return strings.Join(lines, "\n")
+	status.Summary = strings.Join(lines, "\n")
+	return status
+}
+
+func (c *Cluster) adminStatus() string {
+	return c.GatewayStatus().Summary
 }
