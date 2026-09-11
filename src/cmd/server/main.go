@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	_ "expvar"
+	"expvar"
 	"flag"
 	"fmt"
 	"net"
@@ -28,6 +28,11 @@ import (
 )
 
 const defaultGameStreamStateInterval = 100 * time.Millisecond
+
+// legacyGatewayGameStreamCalls records connections to the V1 game stream. It
+// is exposed through /debug/vars and must remain unchanged for a full release
+// window before the V1 Gateway RPC can be retired.
+var legacyGatewayGameStreamCalls = expvar.NewInt("battleworld_gateway_v1_stream_calls_total")
 
 // gatewayBackend 是 GatewayService 在 V1 游戏流中依赖的最小业务能力集合。
 // 保持传输 handler 与具体 Cluster 实现解耦，使协议行为可在不依赖 Redis 或 PostgreSQL 的
@@ -63,6 +68,7 @@ func (s *GatewayServer) gameStreamStateInterval() time.Duration {
 }
 
 func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) error {
+	legacyGatewayGameStreamCalls.Add(1)
 	reqPb, err := stream.Recv()
 	if err != nil {
 		return err

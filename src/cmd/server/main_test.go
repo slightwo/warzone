@@ -174,6 +174,7 @@ func testWorldState() *protocol.WorldState {
 }
 
 func TestGameStreamRejectsNonAuthenticationFirstMessage(t *testing.T) {
+	legacyCallsBefore := legacyGatewayGameStreamCalls.Value()
 	backend := &fakeGatewayBackend{}
 	stream, closeClient := newGatewayTestStream(t, backend)
 	defer closeClient()
@@ -184,6 +185,9 @@ func TestGameStreamRejectsNonAuthenticationFirstMessage(t *testing.T) {
 	response := receiveV1Message(t, stream)
 	if response.Type != protocol.TypeError || !strings.Contains(response.Error, "首条消息必须是登录或注册请求") {
 		t.Fatalf("首条非认证响应 = %+v", response)
+	}
+	if got := legacyGatewayGameStreamCalls.Value(); got != legacyCallsBefore+1 {
+		t.Fatalf("V1 stream 遥测 = %d，want %d", got, legacyCallsBefore+1)
 	}
 	if _, err := stream.Recv(); err == nil {
 		t.Fatal("首条非认证被拒后 stream 应结束")

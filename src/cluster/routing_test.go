@@ -222,6 +222,7 @@ func (s *rejectingV2NodeServer) AddPlayer(context.Context, *pb.NodeAddPlayerRequ
 }
 
 func TestNodeGRPCClientFallsBackOnlyForV1OnlyNode(t *testing.T) {
+	fallbacksBefore := nodeV1FallbacksTotal.Value()
 	listener := startNodeClientTestServer(t, func(server *grpc.Server) {
 		pb.RegisterNodeServiceServer(server, &v1OnlyNodeServer{})
 	})
@@ -233,8 +234,14 @@ func TestNodeGRPCClientFallsBackOnlyForV1OnlyNode(t *testing.T) {
 	if !client.usingV1() {
 		t.Fatal("V2 Unimplemented 后未固定使用 V1")
 	}
-	if got := client.View(); got.ID != "node-a" || !got.Healthy {
-		t.Fatalf("V1 fallback View = %+v", got)
+	if got := nodeV1FallbacksTotal.Value(); got != fallbacksBefore+1 {
+		t.Fatalf("V1 fallback 遥测 = %d，want %d", got, fallbacksBefore+1)
+	}
+	if view := client.View(); view.ID != "node-a" || !view.Healthy {
+		t.Fatalf("V1 fallback View = %+v", view)
+	}
+	if got := nodeV1FallbacksTotal.Value(); got != fallbacksBefore+1 {
+		t.Fatalf("V1 fallback 后续 V1 调用不应重复计数，got %d，want %d", got, fallbacksBefore+1)
 	}
 }
 

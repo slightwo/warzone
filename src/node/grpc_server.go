@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"expvar"
 	"fmt"
 	"strings"
 	"time"
@@ -17,6 +18,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// legacyNodeServiceCalls counts requests handled by the V1 Node service. It
+// is exposed from a node's lifecycle endpoint at /debug/vars and must remain
+// unchanged for a full release window before NodeService can be retired.
+var legacyNodeServiceCalls = expvar.NewInt("battleworld_node_v1_calls_total")
+
 // NodeGRPCServer serves the wire-compatible NodeService V1 while V2 callers
 // use the dedicated typed endpoint returned by NewNodeV2GRPCServer.
 type NodeGRPCServer struct {
@@ -28,11 +34,17 @@ func NewNodeGRPCServer(svc *NodeService) *NodeGRPCServer {
 	return &NodeGRPCServer{svc: svc}
 }
 
+func (s *NodeGRPCServer) recordLegacyCall() {
+	legacyNodeServiceCalls.Add(1)
+}
+
 func (s *NodeGRPCServer) Ping(context.Context, *pb.PingReq) (*pb.PingResp, error) {
+	s.recordLegacyCall()
 	return &pb.PingResp{Ts: time.Now().UnixMilli()}, nil
 }
 
 func (s *NodeGRPCServer) AddPlayer(ctx context.Context, req *pb.AddPlayerReq) (*pb.AddPlayerResp, error) {
+	s.recordLegacyCall()
 	profile := legacyUserProfileFromPB(req.GetProfile())
 	if err := s.svc.AddPlayer(ctx, req.GetMapId(), req.GetMapEpoch(), &profile); err != nil {
 		return nil, grpcAuthorityError(err)
@@ -41,6 +53,7 @@ func (s *NodeGRPCServer) AddPlayer(ctx context.Context, req *pb.AddPlayerReq) (*
 }
 
 func (s *NodeGRPCServer) RemovePlayer(ctx context.Context, req *pb.RemovePlayerReq) (*pb.RemovePlayerResp, error) {
+	s.recordLegacyCall()
 	profile, ok, err := s.svc.RemovePlayer(ctx, req.GetMapId(), req.GetUsername(), req.GetMapEpoch())
 	if err != nil {
 		return nil, grpcAuthorityError(err)
@@ -49,6 +62,7 @@ func (s *NodeGRPCServer) RemovePlayer(ctx context.Context, req *pb.RemovePlayerR
 }
 
 func (s *NodeGRPCServer) MovePlayer(ctx context.Context, req *pb.MovePlayerReq) (*pb.MovePlayerResp, error) {
+	s.recordLegacyCall()
 	text, profile, ok, err := s.svc.MovePlayer(ctx, req.GetMapId(), req.GetUsername(), req.GetDir(), req.GetMapEpoch())
 	if err != nil {
 		return nil, grpcAuthorityError(err)
@@ -57,6 +71,7 @@ func (s *NodeGRPCServer) MovePlayer(ctx context.Context, req *pb.MovePlayerReq) 
 }
 
 func (s *NodeGRPCServer) Attack(ctx context.Context, req *pb.AttackReq) (*pb.AttackResp, error) {
+	s.recordLegacyCall()
 	log1, log2, log3, profile, ok, err := s.svc.Attack(ctx, req.GetMapId(), req.GetUsername(), req.GetMapEpoch())
 	if err != nil {
 		return nil, grpcAuthorityError(err)
@@ -65,6 +80,7 @@ func (s *NodeGRPCServer) Attack(ctx context.Context, req *pb.AttackReq) (*pb.Att
 }
 
 func (s *NodeGRPCServer) Heal(ctx context.Context, req *pb.HealReq) (*pb.HealResp, error) {
+	s.recordLegacyCall()
 	text, profile, ok, err := s.svc.Heal(ctx, req.GetMapId(), req.GetUsername(), req.GetMapEpoch())
 	if err != nil {
 		return nil, grpcAuthorityError(err)
@@ -73,6 +89,7 @@ func (s *NodeGRPCServer) Heal(ctx context.Context, req *pb.HealReq) (*pb.HealRes
 }
 
 func (s *NodeGRPCServer) BuyItem(ctx context.Context, req *pb.BuyItemReq) (*pb.BuyItemResp, error) {
+	s.recordLegacyCall()
 	text, profile, ok, err := s.svc.BuyItem(ctx, req.GetMapId(), req.GetUsername(), req.GetItem(), req.GetMapEpoch())
 	if err != nil {
 		return nil, grpcAuthorityError(err)
@@ -81,6 +98,7 @@ func (s *NodeGRPCServer) BuyItem(ctx context.Context, req *pb.BuyItemReq) (*pb.B
 }
 
 func (s *NodeGRPCServer) AttackBoss(ctx context.Context, req *pb.AttackBossReq) (*pb.AttackBossResp, error) {
+	s.recordLegacyCall()
 	text, profile, ok, err := s.svc.AttackBoss(ctx, req.GetMapId(), req.GetUsername(), req.GetMapEpoch())
 	if err != nil {
 		return nil, grpcAuthorityError(err)
@@ -89,6 +107,7 @@ func (s *NodeGRPCServer) AttackBoss(ctx context.Context, req *pb.AttackBossReq) 
 }
 
 func (s *NodeGRPCServer) Profile(ctx context.Context, req *pb.ProfileReq) (*pb.ProfileResp, error) {
+	s.recordLegacyCall()
 	profile, ok, err := s.svc.Profile(ctx, req.GetMapId(), req.GetUsername())
 	if err != nil {
 		return nil, err
@@ -97,6 +116,7 @@ func (s *NodeGRPCServer) Profile(ctx context.Context, req *pb.ProfileReq) (*pb.P
 }
 
 func (s *NodeGRPCServer) RewardPlayer(ctx context.Context, req *pb.RewardPlayerReq) (*pb.RewardPlayerResp, error) {
+	s.recordLegacyCall()
 	profile, ok, err := s.svc.RewardPlayer(ctx, req.GetMapId(), req.GetUsername(), int(req.GetTreasureDelta()), int(req.GetVictoryDelta()), req.GetMapEpoch())
 	if err != nil {
 		return nil, grpcAuthorityError(err)
@@ -105,6 +125,7 @@ func (s *NodeGRPCServer) RewardPlayer(ctx context.Context, req *pb.RewardPlayerR
 }
 
 func (s *NodeGRPCServer) Snapshot(ctx context.Context, req *pb.SnapshotReq) (*pb.SnapshotResp, error) {
+	s.recordLegacyCall()
 	view, err := s.svc.Snapshot(ctx, req.GetMapId())
 	if err != nil {
 		return nil, err
@@ -113,6 +134,7 @@ func (s *NodeGRPCServer) Snapshot(ctx context.Context, req *pb.SnapshotReq) (*pb
 }
 
 func (s *NodeGRPCServer) Counts(ctx context.Context, req *pb.CountsReq) (*pb.CountsResp, error) {
+	s.recordLegacyCall()
 	players, npcs, treasures, version, err := s.svc.Counts(ctx, req.GetMapId())
 	if err != nil {
 		return nil, err
@@ -121,6 +143,7 @@ func (s *NodeGRPCServer) Counts(ctx context.Context, req *pb.CountsReq) (*pb.Cou
 }
 
 func (s *NodeGRPCServer) Checkpoint(ctx context.Context, req *pb.CheckpointReq) (*pb.CheckpointResp, error) {
+	s.recordLegacyCall()
 	checkpoint, err := s.svc.Checkpoint(ctx, req.GetMapId())
 	if err != nil {
 		return nil, err
@@ -129,6 +152,7 @@ func (s *NodeGRPCServer) Checkpoint(ctx context.Context, req *pb.CheckpointReq) 
 }
 
 func (s *NodeGRPCServer) Promote(ctx context.Context, req *pb.PromoteReq) (*pb.PromoteResp, error) {
+	s.recordLegacyCall()
 	config, err := nodeMapConfig(req.GetMapId())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -140,6 +164,7 @@ func (s *NodeGRPCServer) Promote(ctx context.Context, req *pb.PromoteReq) (*pb.P
 }
 
 func (s *NodeGRPCServer) View(context.Context, *pb.ViewReq) (*pb.ViewResp, error) {
+	s.recordLegacyCall()
 	return &pb.ViewResp{View: nodewire.ToNodeView(s.svc.View())}, nil
 }
 

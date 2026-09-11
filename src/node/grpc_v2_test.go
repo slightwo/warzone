@@ -24,6 +24,7 @@ import (
 const nodeV2TestBufferSize = 1024 * 1024
 
 func TestNodeV1AndV2ServicesCoexist(t *testing.T) {
+	legacyCallsBefore := legacyNodeServiceCalls.Value()
 	service := NewNodeService("node-a", "", nil)
 	listener := bufconn.Listen(nodeV2TestBufferSize)
 	server := grpc.NewServer()
@@ -52,6 +53,9 @@ func TestNodeV1AndV2ServicesCoexist(t *testing.T) {
 	if legacy.GetTs() <= 0 {
 		t.Fatalf("V1 Ping 时间戳 = %d，want positive", legacy.GetTs())
 	}
+	if got := legacyNodeServiceCalls.Value(); got != legacyCallsBefore+1 {
+		t.Fatalf("V1 Node 遥测 = %d，want %d", got, legacyCallsBefore+1)
+	}
 
 	typed, err := pb.NewNodeServiceV2Client(conn).Ping(ctx, &pb.NodePingRequest{})
 	if err != nil {
@@ -59,6 +63,9 @@ func TestNodeV1AndV2ServicesCoexist(t *testing.T) {
 	}
 	if typed.GetObservedAt() == nil || typed.GetObservedAt().CheckValid() != nil {
 		t.Fatalf("V2 Ping observed_at 无效: %v", typed.GetObservedAt())
+	}
+	if got := legacyNodeServiceCalls.Value(); got != legacyCallsBefore+1 {
+		t.Fatalf("V2 调用不应增加 V1 Node 遥测，got %d，want %d", got, legacyCallsBefore+1)
 	}
 }
 

@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"expvar"
 	"fmt"
 	"sync"
 
@@ -15,6 +16,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
+
+// nodeV1FallbacksTotal counts peers that explicitly report NodeServiceV2 as
+// unimplemented. It is a V1-retirement gate: after every peer rollout, this
+// counter must stay unchanged for a full release window.
+var nodeV1FallbacksTotal = expvar.NewInt("battleworld_node_v1_fallbacks_total")
 
 // NodeGRPCClient is a migration client for the Node data and control planes.
 // It begins with NodeServiceV2 and permanently switches to V1 only when the
@@ -65,7 +71,14 @@ func (c *NodeGRPCClient) downgradeOnUnimplemented(err error) bool {
 	if status.Code(err) != codes.Unimplemented {
 		return false
 	}
-	c.v1Once.Do(func() { close(c.useV1) })
+	downgraded := false
+	c.v1Once.Do(func() {
+		close(c.useV1)
+		downgraded = true
+	})
+	if downgraded {
+		nodeV1FallbacksTotal.Add(1)
+	}
 	return true
 }
 
