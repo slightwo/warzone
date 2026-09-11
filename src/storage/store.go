@@ -22,7 +22,10 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrGlobalBossNotInitialized = errors.New("boss state not initialized")
+var (
+	ErrGlobalBossNotInitialized = errors.New("boss state not initialized")
+	ErrDatabaseUnavailable      = errors.New("sql database is not configured")
+)
 
 type Store struct {
 	db  *gorm.DB
@@ -37,6 +40,13 @@ func (s *Store) RedisClient() *redis.Client {
 		return nil
 	}
 	return s.rdb
+}
+
+func (s *Store) database() (*gorm.DB, error) {
+	if s == nil || s.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	return s.db, nil
 }
 
 type GlobalSession struct {
@@ -107,6 +117,20 @@ func fromDBUser(u UserRecord) protocol.UserProfile {
 	}
 }
 
+// NewRedisStore creates a Store backed by an already-configured Redis client.
+// It is suitable for Redis-only collaborators such as topology fencing; SQL-backed
+// account methods require a Store returned by NewStore.
+func NewRedisStore(client *redis.Client) (*Store, error) {
+	if client == nil {
+		return nil, errors.New("redis client 不能为空")
+	}
+	ctx := context.Background()
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("ping redis: %w", err)
+	}
+	return &Store{rdb: client, ctx: ctx}, nil
+}
+
 func NewStore(baseDir string) (*Store, error) {
 	// 数据库密码必须显式注入，避免把秘密写死在代码里。
 	if config.DBPassword() == "" {
@@ -161,10 +185,14 @@ func (s *Store) Register(username, password string) error {
 	if username == "" || password == "" {
 		return errors.New("用户名和密码不能为空")
 	}
+	db, err := s.database()
+	if err != nil {
+		return err
+	}
 
 	// 在PG里检查是否已存在
 	var count int64
-	s.db.Model(&UserRecord{}).Where("username = ?", username).Count(&count)
+	db.Model(&UserRecord{}).Where("username = ?", username).Count(&count)
 	if count > 0 {
 		return fmt.Errorf("用户 %q 已存在", username)
 	}
@@ -188,7 +216,7 @@ func (s *Store) Register(username, password string) error {
 	}
 
 	dbUser := toDBUser(p)
-	if err := s.db.Create(&dbUser).Error; err != nil {
+	if err := db.Create(&dbUser).Error; err != nil {
 		return err
 	}
 	return nil
@@ -198,9 +226,13 @@ func (s *Store) Authenticate(username, password string) (*protocol.UserProfile, 
 	if username == "" || password == "" {
 		return nil, errors.New("用户名和密码不能为空")
 	}
+	db, err := s.database()
+	if err != nil {
+		return nil, err
+	}
 
 	var user UserRecord
-	if err := s.db.Where("username = ?", username).First(&user).Error; err != nil {
+	if err := db.Where("username = ?", username).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("用户 %q 不存在", username)
 		}
@@ -216,8 +248,12 @@ func (s *Store) Authenticate(username, password string) (*protocol.UserProfile, 
 }
 
 func (s *Store) LoadProfile(username string) (*protocol.UserProfile, error) {
+	db, err := s.database()
+	if err != nil {
+		return nil, err
+	}
 	var user UserRecord
-	if err := s.db.Where("username = ?", username).First(&user).Error; err != nil {
+	if err := db.Where("username = ?", username).First(&user).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("用户 %q 不存在", username)
 		}
@@ -229,11 +265,15 @@ func (s *Store) LoadProfile(username string) (*protocol.UserProfile, error) {
 }
 
 func (s *Store) SaveProfile(profile protocol.UserProfile) error {
+	db, err := s.database()
+	if err != nil {
+		return err
+	}
 	// 如果密码为空，从数据库中取回原有密码再更新
 	dbUser := toDBUser(profile)
 
 	// 构建复用的 db 链式调用
-	tx := s.db
+	tx := db
 
 	// 如果密码为空，我们就告诉 GORM 在更新时忽略 PasswordHash 这个字段
 	// 这样数据库里原有的密码就不会被覆盖了

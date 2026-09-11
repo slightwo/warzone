@@ -10,8 +10,26 @@ import (
 	"testing"
 	"time"
 
+	"battleworld/protocol"
+
 	"github.com/redis/go-redis/v9"
 )
+
+func TestRedisOnlyStoreRejectsSQLOperations(t *testing.T) {
+	store := newTopologyTestStore(t)
+	if err := store.Register("user", "password"); !errors.Is(err, ErrDatabaseUnavailable) {
+		t.Fatalf("Redis-only Register error = %v, want ErrDatabaseUnavailable", err)
+	}
+	if _, err := store.Authenticate("user", "password"); !errors.Is(err, ErrDatabaseUnavailable) {
+		t.Fatalf("Redis-only Authenticate error = %v, want ErrDatabaseUnavailable", err)
+	}
+	if _, err := store.LoadProfile("user"); !errors.Is(err, ErrDatabaseUnavailable) {
+		t.Fatalf("Redis-only LoadProfile error = %v, want ErrDatabaseUnavailable", err)
+	}
+	if err := store.SaveProfile(protocol.UserProfile{Username: "user"}); !errors.Is(err, ErrDatabaseUnavailable) {
+		t.Fatalf("Redis-only SaveProfile error = %v, want ErrDatabaseUnavailable", err)
+	}
+}
 
 func TestTopologyCloneAndValidate(t *testing.T) {
 	topology := validTopology()
@@ -325,5 +343,9 @@ func newTopologyTestStore(t *testing.T) *Store {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return &Store{rdb: client, ctx: context.Background()}
+	store, err := NewRedisStore(client)
+	if err != nil {
+		t.Fatalf("创建 Redis-only Store: %v", err)
+	}
+	return store
 }

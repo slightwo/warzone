@@ -1,5 +1,8 @@
 syntax = "proto3";
 package pb;
+
+import "google/protobuf/timestamp.proto";
+
 option go_package = "battleworld/pb";
 
 message PlayerView {
@@ -471,5 +474,185 @@ message PromoteResp {
 message ViewReq {}
 
 message ViewResp {
+    NodeView view = 1;
+}
+
+// NodeServiceV2 is the typed Node RPC contract used by Gateway and Coordinator.
+// It is served alongside NodeService during the compatibility window. Every map
+// mutation carries MapAuthority so the node can fence stale owners before world
+// state changes; no Node V2 payload includes an account password hash.
+service NodeServiceV2 {
+    rpc Ping(NodePingRequest) returns (NodePingResponse);
+    rpc AddPlayer(NodeAddPlayerRequest) returns (NodeAddPlayerResponse);
+    rpc RemovePlayer(NodeRemovePlayerRequest) returns (NodeRemovePlayerResponse);
+    rpc MovePlayer(NodeMovePlayerRequest) returns (NodePlayerActionResponse);
+    rpc Attack(NodeAttackRequest) returns (NodeAttackResponse);
+    rpc Heal(NodePlayerRequest) returns (NodePlayerActionResponse);
+    rpc BuyItem(NodeBuyItemRequest) returns (NodePlayerActionResponse);
+    rpc AttackBoss(NodePlayerRequest) returns (NodePlayerActionResponse);
+    rpc Profile(NodeProfileRequest) returns (NodeProfileResponse);
+    rpc RewardPlayer(NodeRewardPlayerRequest) returns (NodeProfileResponse);
+    rpc Snapshot(NodeSnapshotRequest) returns (NodeSnapshotResponse);
+    rpc Counts(NodeCountsRequest) returns (NodeCountsResponse);
+    rpc Checkpoint(NodeCheckpointRequest) returns (NodeCheckpointResponse);
+    rpc Promote(NodePromoteRequest) returns (NodePromoteResponse);
+    rpc View(NodeViewRequest) returns (NodeViewResponse);
+}
+
+// MapAuthority is the immutable topology proof attached to every V2 map write.
+// owner_node_id allows nodes to reject malformed calls before their local/Redis
+// authority checks; map_epoch is the fencing token enforced at the write point.
+message MapAuthority {
+    string map_id = 1;
+    string owner_node_id = 2;
+    uint64 map_epoch = 3;
+}
+
+// PlayerState is the Node data-plane player model. It deliberately excludes
+// password_hash, which belongs only to the account storage boundary.
+message PlayerState {
+    string username = 1;
+    string last_map = 2;
+    string last_node = 3;
+    int32 x = 4;
+    int32 y = 5;
+    int32 hp = 6;
+    int32 max_hp = 7;
+    int32 attack = 8;
+    int32 potions = 9;
+    int32 treasures = 10;
+    int32 kills = 11;
+    int32 deaths = 12;
+    int32 victories = 13;
+    bool alive = 14;
+}
+
+message NodePingRequest {}
+
+message NodePingResponse {
+    google.protobuf.Timestamp observed_at = 1;
+}
+
+message NodeAddPlayerRequest {
+    MapAuthority authority = 1;
+    PlayerState player = 2;
+}
+
+message NodeAddPlayerResponse {}
+
+message NodeRemovePlayerRequest {
+    MapAuthority authority = 1;
+    string username = 2;
+}
+
+message NodeRemovePlayerResponse {
+    PlayerState player = 1;
+    bool removed = 2;
+}
+
+message NodeMovePlayerRequest {
+    MapAuthority authority = 1;
+    string username = 2;
+    Direction direction = 3;
+}
+
+message NodePlayerRequest {
+    MapAuthority authority = 1;
+    string username = 2;
+}
+
+message NodeBuyItemRequest {
+    MapAuthority authority = 1;
+    string username = 2;
+    string item = 3;
+}
+
+message NodePlayerActionResponse {
+    string message = 1;
+    PlayerState player = 2;
+    bool accepted = 3;
+}
+
+message NodeAttackRequest {
+    MapAuthority authority = 1;
+    string username = 2;
+}
+
+message NodeAttackResponse {
+    string message = 1;
+    string target_message = 2;
+    string global_message = 3;
+    PlayerState player = 4;
+    bool accepted = 5;
+}
+
+message NodeProfileRequest {
+    string map_id = 1;
+    string username = 2;
+}
+
+message NodeProfileResponse {
+    PlayerState player = 1;
+    bool found = 2;
+}
+
+message NodeRewardPlayerRequest {
+    MapAuthority authority = 1;
+    string username = 2;
+    int32 treasure_delta = 3;
+    int32 victory_delta = 4;
+}
+
+message NodeSnapshotRequest {
+    string map_id = 1;
+}
+
+message NodeSnapshotResponse {
+    MapView map = 1;
+}
+
+message NodeCountsRequest {
+    string map_id = 1;
+}
+
+message NodeCountsResponse {
+    int32 players = 1;
+    int32 npcs = 2;
+    int32 treasures = 3;
+    int64 version = 4;
+}
+
+message NodeCheckpointRequest {
+    string map_id = 1;
+}
+
+message NodeCheckpointResponse {
+    NodeCheckpoint checkpoint = 1;
+}
+
+// NodeCheckpoint uses protobuf Timestamp rather than a string timestamp so an
+// invalid wire timestamp is rejected by protobuf validation before promotion.
+message NodeCheckpoint {
+    string map_id = 1;
+    string node_id = 2;
+    int64 version = 3;
+    repeated string terrain = 4;
+    repeated PlayerView players = 5;
+    repeated NPCView npcs = 6;
+    repeated TreasureView treasures = 7;
+    google.protobuf.Timestamp captured_at = 8;
+    uint64 map_epoch = 9;
+}
+
+message NodePromoteRequest {
+    MapAuthority authority = 1;
+    NodeCheckpoint checkpoint = 2;
+}
+
+message NodePromoteResponse {}
+
+message NodeViewRequest {}
+
+message NodeViewResponse {
     NodeView view = 1;
 }

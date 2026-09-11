@@ -6,6 +6,7 @@ import (
 
 	"battleworld/protocol"
 	"battleworld/storage"
+	gatewaywire "battleworld/transport/gateway"
 )
 
 // TestSnapshotForExposesTopologyVersionAndMapEpoch 验证网关在 SnapshotFor 中
@@ -60,11 +61,11 @@ func TestSnapshotForExposesTopologyVersionAndMapEpoch(t *testing.T) {
 		t.Fatalf("SessionVersion = %d, want 42", ws.SessionVersion)
 	}
 
-	// 通过 adapter 往返后字段仍应保留，确保客户端收到的 protobuf 消息不丢字段。
-	pb := protocol.ToProtoWorldState(ws)
-	round := protocol.FromProtoWorldState(pb)
+	// 通过 Gateway 传输边界往返后字段仍应保留，确保客户端收到的 protobuf 消息不丢字段。
+	wireState := gatewaywire.ToWorldState(ws)
+	round := gatewaywire.FromWorldState(wireState)
 	if round.TopologyVersion != 3 || round.MapEpoch != 7 {
-		t.Fatalf("adapter 往返后 TopologyVersion=%d MapEpoch=%d", round.TopologyVersion, round.MapEpoch)
+		t.Fatalf("Gateway mapper 往返后 TopologyVersion=%d MapEpoch=%d", round.TopologyVersion, round.MapEpoch)
 	}
 
 	// 复用 pool 后新分配的对象不应携带上一次的拓扑字段。

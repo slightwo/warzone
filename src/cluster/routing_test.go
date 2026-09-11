@@ -2,11 +2,22 @@ package cluster
 
 import (
 	"context"
+	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"battleworld/pb"
 	"battleworld/protocol"
 	"battleworld/storage"
+	"battleworld/world"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 type fakeGatewayNodeClient struct {
@@ -134,5 +145,231 @@ func TestGatewayOwnerTargetsSkipsDrainingOwner(t *testing.T) {
 	}})
 	if len(targets) != 0 {
 		t.Fatalf("draining owner 不应保留数据面目标: %v", targets)
+	}
+}
+
+const nodeClientTestBufferSize = 1024 * 1024
+
+type v1OnlyNodeServer struct {
+	pb.UnimplementedNodeServiceServer
+	pings      atomic.Int32
+	addPlayers atomic.Int32
+	promotes   atomic.Int32
+
+	mu         sync.Mutex
+	profile    *pb.UserProfile
+	checkpoint *pb.MapCheckpoint
+}
+
+func (s *v1OnlyNodeServer) Ping(context.Context, *pb.PingReq) (*pb.PingResp, error) {
+	s.pings.Add(1)
+	return &pb.PingResp{Ts: 1}, nil
+}
+
+func (s *v1OnlyNodeServer) AddPlayer(_ context.Context, req *pb.AddPlayerReq) (*pb.AddPlayerResp, error) {
+	s.addPlayers.Add(1)
+	if req.GetProfile().GetUsername() == "" {
+		return &pb.AddPlayerResp{Ok: false}, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.profile = req.GetProfile()
+	return &pb.AddPlayerResp{Ok: true}, nil
+}
+
+func (s *v1OnlyNodeServer) Profile(_ context.Context, req *pb.ProfileReq) (*pb.ProfileResp, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.profile == nil || s.profile.GetUsername() != req.GetUsername() {
+		return &pb.ProfileResp{}, nil
+	}
+	return &pb.ProfileResp{Profile: s.profile, Ok: true}, nil
+}
+
+func (s *v1OnlyNodeServer) Checkpoint(context.Context, *pb.CheckpointReq) (*pb.CheckpointResp, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.checkpoint == nil {
+		s.checkpoint = &pb.MapCheckpoint{MapId: "green", NodeId: "node-a", MapEpoch: 1, Version: 3, Terrain: []string{"...."}, Checkpoint: "2026-09-10T16:00:00Z"}
+	}
+	return &pb.CheckpointResp{Checkpoint: s.checkpoint}, nil
+}
+
+func (s *v1OnlyNodeServer) Promote(_ context.Context, req *pb.PromoteReq) (*pb.PromoteResp, error) {
+	s.promotes.Add(1)
+	if req.GetCheckpoint() == nil || req.GetCheckpoint().GetCheckpoint() == "" {
+		return &pb.PromoteResp{}, nil
+	}
+	return &pb.PromoteResp{Ok: true}, nil
+}
+
+func (s *v1OnlyNodeServer) View(context.Context, *pb.ViewReq) (*pb.ViewResp, error) {
+	return &pb.ViewResp{View: &pb.NodeView{Id: "node-a", Healthy: true}}, nil
+}
+
+type rejectingV2NodeServer struct {
+	pb.UnimplementedNodeServiceV2Server
+	addPlayers atomic.Int32
+}
+
+func (*rejectingV2NodeServer) Ping(context.Context, *pb.NodePingRequest) (*pb.NodePingResponse, error) {
+	return nil, status.Error(codes.FailedPrecondition, "topology unavailable")
+}
+
+func (s *rejectingV2NodeServer) AddPlayer(context.Context, *pb.NodeAddPlayerRequest) (*pb.NodeAddPlayerResponse, error) {
+	s.addPlayers.Add(1)
+	return nil, status.Error(codes.FailedPrecondition, "topology unavailable")
+}
+
+func TestNodeGRPCClientFallsBackOnlyForV1OnlyNode(t *testing.T) {
+	listener := startNodeClientTestServer(t, func(server *grpc.Server) {
+		pb.RegisterNodeServiceServer(server, &v1OnlyNodeServer{})
+	})
+	client := newNodeClientForListener(t, listener)
+
+	if err := client.Ping(context.Background()); err != nil {
+		t.Fatalf("V1 fallback Ping: %v", err)
+	}
+	if !client.usingV1() {
+		t.Fatal("V2 Unimplemented 后未固定使用 V1")
+	}
+	if got := client.View(); got.ID != "node-a" || !got.Healthy {
+		t.Fatalf("V1 fallback View = %+v", got)
+	}
+}
+
+func TestNodeGRPCClientDoesNotFallbackForV2SemanticError(t *testing.T) {
+	legacy := &v1OnlyNodeServer{}
+	typed := &rejectingV2NodeServer{}
+	listener := startNodeClientTestServer(t, func(server *grpc.Server) {
+		pb.RegisterNodeServiceServer(server, legacy)
+		pb.RegisterNodeServiceV2Server(server, typed)
+	})
+	client := newNodeClientForListener(t, listener)
+
+	err := client.Ping(context.Background())
+	if got := status.Code(err); got != codes.FailedPrecondition {
+		t.Fatalf("V2 语义错误 code = %s，want FailedPrecondition; err=%v", got, err)
+	}
+	if client.usingV1() {
+		t.Fatal("V2 非 Unimplemented 错误不应触发 V1 回退")
+	}
+	if err := client.AddPlayer(context.Background(), "green", 1, &protocol.UserProfile{Username: "hero"}); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("V2 写语义错误 code = %s，want FailedPrecondition; err=%v", status.Code(err), err)
+	}
+	if got := typed.addPlayers.Load(); got != 1 {
+		t.Fatalf("V2 AddPlayer 调用次数 = %d，want 1", got)
+	}
+	if got := legacy.addPlayers.Load(); got != 0 {
+		t.Fatalf("V2 语义错误后不应回退执行 V1 AddPlayer，got %d", got)
+	}
+}
+
+func TestNodeGRPCClientFallsBackForWriteExactlyOnce(t *testing.T) {
+	legacy := &v1OnlyNodeServer{}
+	listener := startNodeClientTestServer(t, func(server *grpc.Server) {
+		pb.RegisterNodeServiceServer(server, legacy)
+	})
+	client := newNodeClientForListener(t, listener)
+
+	if err := client.AddPlayer(context.Background(), "green", 1, &protocol.UserProfile{Username: "hero"}); err != nil {
+		t.Fatalf("V1 fallback AddPlayer: %v", err)
+	}
+	if !client.usingV1() {
+		t.Fatal("V2 AddPlayer Unimplemented 后未固定使用 V1")
+	}
+	if got := legacy.addPlayers.Load(); got != 1 {
+		t.Fatalf("V1 AddPlayer 调用次数 = %d，want exactly once", got)
+	}
+}
+
+func TestNodeGRPCClientV1FallbackPreservesLegacyDataPlane(t *testing.T) {
+	legacy := &v1OnlyNodeServer{}
+	listener := startNodeClientTestServer(t, func(server *grpc.Server) {
+		pb.RegisterNodeServiceServer(server, legacy)
+	})
+	client := newNodeClientForListener(t, listener)
+	ctx := context.Background()
+	original := &protocol.UserProfile{Username: "legacy", PasswordHash: "hash", LastMap: "green", LastNode: "node-a", HP: 91, MaxHP: 100, Alive: true}
+
+	if err := client.AddPlayer(ctx, "green", 1, original); err != nil {
+		t.Fatalf("V1 fallback AddPlayer: %v", err)
+	}
+	profile, found, err := client.Profile(ctx, "green", "legacy")
+	if err != nil || !found || profile.PasswordHash != "hash" || profile.HP != 91 {
+		t.Fatalf("V1 fallback Profile = %+v, found=%t, err=%v", profile, found, err)
+	}
+	checkpoint, err := client.Checkpoint(ctx, "green")
+	if err != nil || checkpoint.MapID != "green" || checkpoint.Version != 3 || checkpoint.Checkpoint.IsZero() {
+		t.Fatalf("V1 fallback Checkpoint = %+v, err=%v", checkpoint, err)
+	}
+	if err := client.Promote("green", world.MapConfig{}, checkpoint, 2); err != nil {
+		t.Fatalf("V1 fallback Promote: %v", err)
+	}
+	if got := legacy.addPlayers.Load(); got != 1 {
+		t.Fatalf("V1 AddPlayer 调用次数 = %d，want 1", got)
+	}
+	if got := legacy.promotes.Load(); got != 1 {
+		t.Fatalf("V1 Promote 调用次数 = %d，want 1", got)
+	}
+}
+
+func TestNodeGRPCClientFallbackIsSafeForConcurrentDiscovery(t *testing.T) {
+	listener := startNodeClientTestServer(t, func(server *grpc.Server) {
+		pb.RegisterNodeServiceServer(server, &v1OnlyNodeServer{})
+	})
+	client := newNodeClientForListener(t, listener)
+
+	const workers = 16
+	errs := make(chan error, workers)
+	for range workers {
+		go func() { errs <- client.Ping(context.Background()) }()
+	}
+	deadline := time.After(2 * time.Second)
+	for range workers {
+		select {
+		case err := <-errs:
+			if err != nil {
+				t.Fatalf("并发 Ping: %v", err)
+			}
+		case <-deadline:
+			t.Fatal("并发 V1 回退超时")
+		}
+	}
+	if !client.usingV1() {
+		t.Fatal("并发发现后未进入 V1 模式")
+	}
+}
+
+func startNodeClientTestServer(t *testing.T, register func(*grpc.Server)) *bufconn.Listener {
+	t.Helper()
+	listener := bufconn.Listen(nodeClientTestBufferSize)
+	server := grpc.NewServer()
+	register(server)
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() {
+		server.Stop()
+		_ = listener.Close()
+	})
+	return listener
+}
+
+func newNodeClientForListener(t *testing.T, listener *bufconn.Listener) *NodeGRPCClient {
+	t.Helper()
+	conn, err := grpc.NewClient(
+		"passthrough:///node-client-test",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("创建测试 gRPC 客户端: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return &NodeGRPCClient{
+		v1:    pb.NewNodeServiceClient(conn),
+		v2:    pb.NewNodeServiceV2Client(conn),
+		conn:  conn,
+		id:    "node-a",
+		useV1: make(chan struct{}),
 	}
 }

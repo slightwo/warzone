@@ -14,6 +14,7 @@ import (
 
 	"battleworld/pb"
 	"battleworld/protocol"
+	gatewaywire "battleworld/transport/gateway"
 )
 
 const v2ControlQueueCapacity = 32
@@ -93,7 +94,7 @@ func (s *v2Sender) SubmitState(state *protocol.WorldState) {
 	if state == nil {
 		return
 	}
-	protobufState := protocol.ToProtoWorldState(state)
+	protobufState := gatewaywire.ToWorldState(state)
 	protocol.FreeWorldState(state)
 	if protobufState == nil {
 		return
@@ -283,7 +284,7 @@ func (s *GatewayServer) GameStreamV2(stream pb.GatewayService_GameStreamV2Server
 		return sendInitialV2Error(stream, first.GetRequestId(), pb.ErrorCode_ERROR_CODE_INTERNAL, "认证成功但未返回世界状态", true)
 	}
 
-	initialStatePB := protocol.ToProtoWorldState(initialState)
+	initialStatePB := gatewaywire.ToWorldState(initialState)
 	protocol.FreeWorldState(initialState)
 	if err := stream.Send(&pb.ServerEnvelope{
 		RequestId: first.GetRequestId(),
@@ -642,7 +643,7 @@ func (s *GatewayServer) GetGatewayStatus(_ context.Context, _ *pb.GatewayStatusR
 		Nodes:           make([]*pb.NodeView, 0, len(gatewayStatus.Nodes)),
 	}
 	for _, node := range gatewayStatus.Nodes {
-		response.Nodes = append(response.Nodes, protocol.ToProtoNodeView(node))
+		response.Nodes = append(response.Nodes, gatewaywire.ToNodeView(node))
 	}
 	return response, nil
 }

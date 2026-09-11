@@ -100,7 +100,10 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer()
+	// 在兼容窗口内同一节点同时服务 V1 与 V2；Gateway/Coordinator 已切换到
+	// NodeServiceV2，而旧二进制仍可继续调用 NodeService。
 	pb.RegisterNodeServiceServer(grpcServer, grpcNode)
+	pb.RegisterNodeServiceV2Server(grpcServer, node.NewNodeV2GRPCServer(ns))
 
 	// 如果有 Redis，则开启心跳上报线程。drain 状态会随下一次租约续期被 coordinator 和
 	// gateway 观察到；注册字段只表达候选能力与生命周期状态，不改变拓扑主权。

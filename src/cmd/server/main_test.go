@@ -16,6 +16,7 @@ import (
 
 	"battleworld/pb"
 	"battleworld/protocol"
+	gatewaywire "battleworld/transport/gateway"
 )
 
 const gatewayTestBufferSize = 1024 * 1024
@@ -177,7 +178,7 @@ func TestGameStreamRejectsNonAuthenticationFirstMessage(t *testing.T) {
 	stream, closeClient := newGatewayTestStream(t, backend)
 	defer closeClient()
 
-	if err := stream.Send(protocol.ToProtoMessage(protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirUp})); err != nil {
+	if err := stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirUp})); err != nil {
 		t.Fatalf("发送首条非认证消息: %v", err)
 	}
 	response := receiveV1Message(t, stream)
@@ -194,7 +195,7 @@ func TestGameStreamAuthenticationFailureSendsErrorAndCloses(t *testing.T) {
 	stream, closeClient := newGatewayTestStream(t, backend)
 	defer closeClient()
 
-	if err := stream.Send(protocol.ToProtoMessage(protocol.Message{
+	if err := stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{
 		Type:     protocol.TypeLogin,
 		Username: "tester",
 		Password: "wrong",
@@ -215,7 +216,7 @@ func TestGameStreamAuthenticationThenPushesStateAndLogsOutOnce(t *testing.T) {
 	stream, closeClient := newGatewayTestStream(t, backend)
 	defer closeClient()
 
-	if err := stream.Send(protocol.ToProtoMessage(protocol.Message{
+	if err := stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{
 		Type:     protocol.TypeLogin,
 		Username: "tester",
 		Password: "password",
@@ -235,7 +236,7 @@ func TestGameStreamAuthenticationThenPushesStateAndLogsOutOnce(t *testing.T) {
 	}
 	assertTestState(t, state.State)
 
-	if err := stream.Send(protocol.ToProtoMessage(protocol.Message{Type: protocol.TypeLogout})); err != nil {
+	if err := stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeLogout})); err != nil {
 		t.Fatalf("发送退出请求: %v", err)
 	}
 	_ = stream.CloseSend()
@@ -256,7 +257,7 @@ func TestGameStreamCommandErrorKeepsStreamOpen(t *testing.T) {
 	defer closeClient()
 
 	loginV1(t, stream)
-	if err := stream.Send(protocol.ToProtoMessage(protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirUp})); err != nil {
+	if err := stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirUp})); err != nil {
 		t.Fatalf("发送移动请求: %v", err)
 	}
 	errorMessage := receiveMessageOfType(t, stream, protocol.TypeError)
@@ -264,7 +265,7 @@ func TestGameStreamCommandErrorKeepsStreamOpen(t *testing.T) {
 		t.Fatalf("移动错误 = %q", errorMessage.Error)
 	}
 
-	if err := stream.Send(protocol.ToProtoMessage(protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirDown})); err != nil {
+	if err := stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeMove, Dir: protocol.DirDown})); err != nil {
 		t.Fatalf("错误后继续发送命令: %v", err)
 	}
 	secondError := receiveMessageOfType(t, stream, protocol.TypeError)
@@ -283,7 +284,7 @@ func TestGameStreamAdminStatusUsesSingleRequestStream(t *testing.T) {
 	stream, closeClient := newGatewayTestStream(t, backend)
 	defer closeClient()
 
-	if err := stream.Send(protocol.ToProtoMessage(protocol.Message{
+	if err := stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{
 		Type:   protocol.TypeAdmin,
 		Action: "status",
 		NodeID: "node-a",
@@ -364,7 +365,7 @@ func newGatewayTestClients(t *testing.T, backend gatewayBackend) (context.Contex
 
 func loginV1(t *testing.T, stream pb.GatewayService_GameStreamClient) {
 	t.Helper()
-	if err := stream.Send(protocol.ToProtoMessage(protocol.Message{
+	if err := stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{
 		Type:     protocol.TypeLogin,
 		Username: "tester",
 		Password: "password",
@@ -383,7 +384,7 @@ func receiveV1Message(t *testing.T, stream pb.GatewayService_GameStreamClient) p
 	if err != nil {
 		t.Fatalf("接收游戏流消息: %v", err)
 	}
-	return protocol.FromProtoMessage(response)
+	return gatewaywire.FromLegacyMessage(response)
 }
 
 func receiveMessageOfType(t *testing.T, stream pb.GatewayService_GameStreamClient, messageType string) protocol.Message {

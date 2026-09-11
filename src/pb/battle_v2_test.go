@@ -84,6 +84,24 @@ func TestV2ContractShapeAndStableErrorCodes(t *testing.T) {
 	status := findMethod(t, admin, "GetGatewayStatus")
 	assertStreamingMethod(t, status, false, false, "GatewayStatusRequest", "GatewayStatusResponse")
 
+	nodeV2 := findService(t, file, "NodeServiceV2")
+	assertStreamingMethod(t, findMethod(t, nodeV2, "AddPlayer"), false, false, "NodeAddPlayerRequest", "NodeAddPlayerResponse")
+	assertStreamingMethod(t, findMethod(t, nodeV2, "Promote"), false, false, "NodePromoteRequest", "NodePromoteResponse")
+
+	authority := findMessage(t, file, "MapAuthority")
+	for name, number := range map[protoreflect.Name]protoreflect.FieldNumber{
+		"map_id": 1, "owner_node_id": 2, "map_epoch": 3,
+	} {
+		assertFieldNumber(t, authority, name, number)
+	}
+	playerState := findMessage(t, file, "PlayerState")
+	assertMissingField(t, playerState, "password_hash")
+	checkpoint := findMessage(t, file, "NodeCheckpoint")
+	assertFieldNumber(t, checkpoint, "captured_at", 8)
+	if field := checkpoint.Fields().ByName("captured_at"); field == nil || string(field.Message().FullName()) != "google.protobuf.Timestamp" {
+		t.Fatalf("NodeCheckpoint.captured_at must be google.protobuf.Timestamp, got %v", field)
+	}
+
 	clientEnvelope := findMessage(t, file, "ClientEnvelope")
 	assertFieldNumber(t, clientEnvelope, "request_id", 1)
 	assertOneof(t, clientEnvelope, "payload")

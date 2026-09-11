@@ -22,6 +22,7 @@ import (
 	"battleworld/pb"
 	"battleworld/protocol"
 	"battleworld/storage"
+	gatewaywire "battleworld/transport/gateway"
 
 	_ "net/http/pprof" // 注册 /debug/pprof/ 性能分析端点。
 )
@@ -67,15 +68,15 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 		return err
 	}
 
-	authMsg := protocol.FromProtoMessage(reqPb)
+	authMsg := gatewaywire.FromLegacyMessage(reqPb)
 
 	if authMsg.Type == protocol.TypeAdmin {
 		text, err := s.gameCluster.ExecuteAdmin(authMsg.Action, authMsg.NodeID)
 		if err != nil {
-			_ = stream.Send(protocol.ToProtoMessage(protocol.Message{Type: protocol.TypeError, Error: err.Error()}))
+			_ = stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeError, Error: err.Error()}))
 			return err
 		}
-		_ = stream.Send(protocol.ToProtoMessage(protocol.Message{Type: protocol.TypeAdmin, OK: true, Text: text}))
+		_ = stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeAdmin, OK: true, Text: text}))
 		return nil
 	}
 
@@ -83,7 +84,7 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 	switch authMsg.Type {
 	case protocol.TypeRegister:
 		if err := s.gameCluster.Register(authMsg.Username, authMsg.Password, authMsg.Confirm); err != nil {
-			_ = stream.Send(protocol.ToProtoMessage(protocol.Message{Type: protocol.TypeError, Error: err.Error()}))
+			_ = stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeError, Error: err.Error()}))
 			return err
 		}
 		state, err = s.gameCluster.Login(authMsg.Username, authMsg.Password)
@@ -92,17 +93,17 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 	case protocol.TypeQuickEnter:
 		state, err = s.gameCluster.QuickEnter(authMsg.Username, authMsg.Password)
 	default:
-		_ = stream.Send(protocol.ToProtoMessage(protocol.Message{Type: protocol.TypeError, Error: "首条消息必须是登录或注册请求"}))
+		_ = stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeError, Error: "首条消息必须是登录或注册请求"}))
 		return fmt.Errorf("invalid first message type: %s", authMsg.Type)
 	}
 
 	if err != nil {
-		_ = stream.Send(protocol.ToProtoMessage(protocol.Message{Type: protocol.TypeError, Error: err.Error()}))
+		_ = stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeError, Error: err.Error()}))
 		return err
 	}
 
 	username := authMsg.Username
-	if err := stream.Send(protocol.ToProtoMessage(protocol.Message{Type: protocol.TypeAuth, OK: true, State: state})); err != nil {
+	if err := stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeAuth, OK: true, State: state})); err != nil {
 		_ = s.gameCluster.Logout(username)
 		return err
 	}
@@ -123,7 +124,7 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 		for {
 			select {
 			case msg := <-sendCh:
-				err := stream.Send(protocol.ToProtoMessage(*msg))
+				err := stream.Send(gatewaywire.ToLegacyMessage(*msg))
 
 				if msg.State != nil {
 					protocol.FreeWorldState(msg.State)
@@ -175,7 +176,7 @@ func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) er
 		if err != nil {
 			return err
 		}
-		msg := protocol.FromProtoMessage(reqPb)
+		msg := gatewaywire.FromLegacyMessage(reqPb)
 
 		var next *protocol.WorldState
 		switch msg.Type {
