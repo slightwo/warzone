@@ -5,7 +5,6 @@ package node
 
 import (
 	"fmt"
-	"time"
 
 	"battleworld/pb"
 	"battleworld/protocol"
@@ -55,51 +54,6 @@ func FromPlayerState(profile *pb.PlayerState) protocol.UserProfile {
 		Deaths:    int(profile.GetDeaths()),
 		Victories: int(profile.GetVictories()),
 		Alive:     profile.GetAlive(),
-	}
-}
-
-// ToLegacyUserProfile and FromLegacyUserProfile are isolated V1 compatibility
-// mappings. PasswordHash must never flow through PlayerState or NodeServiceV2.
-func ToLegacyUserProfile(profile protocol.UserProfile) *pb.UserProfile {
-	return &pb.UserProfile{
-		Username:     profile.Username,
-		PasswordHash: profile.PasswordHash,
-		LastMap:      profile.LastMap,
-		LastNode:     profile.LastNode,
-		X:            int32(profile.X),
-		Y:            int32(profile.Y),
-		Hp:           int32(profile.HP),
-		MaxHp:        int32(profile.MaxHP),
-		Attack:       int32(profile.Attack),
-		Potions:      int32(profile.Potions),
-		Treasures:    int32(profile.Treasures),
-		Kills:        int32(profile.Kills),
-		Deaths:       int32(profile.Deaths),
-		Victories:    int32(profile.Victories),
-		Alive:        profile.Alive,
-	}
-}
-
-func FromLegacyUserProfile(profile *pb.UserProfile) protocol.UserProfile {
-	if profile == nil {
-		return protocol.UserProfile{}
-	}
-	return protocol.UserProfile{
-		Username:     profile.GetUsername(),
-		PasswordHash: profile.GetPasswordHash(),
-		LastMap:      profile.GetLastMap(),
-		LastNode:     profile.GetLastNode(),
-		X:            int(profile.GetX()),
-		Y:            int(profile.GetY()),
-		HP:           int(profile.GetHp()),
-		MaxHP:        int(profile.GetMaxHp()),
-		Attack:       int(profile.GetAttack()),
-		Potions:      int(profile.GetPotions()),
-		Treasures:    int(profile.GetTreasures()),
-		Kills:        int(profile.GetKills()),
-		Deaths:       int(profile.GetDeaths()),
-		Victories:    int(profile.GetVictories()),
-		Alive:        profile.GetAlive(),
 	}
 }
 
@@ -335,63 +289,6 @@ func FromNodeView(view *pb.NodeView) protocol.NodeView {
 		ReplicaMaps:   append([]string(nil), view.GetReplicaMaps()...),
 		LastHeartbeat: view.GetLastHeartbeat(),
 	}
-}
-
-// ToLegacyCheckpoint and FromLegacyCheckpoint preserve the V1 RFC3339 string
-// wire contract until all callers have been migrated to NodeServiceV2.
-func ToLegacyCheckpoint(checkpoint protocol.MapCheckpoint) *pb.MapCheckpoint {
-	if checkpoint.MapID == "" {
-		return nil
-	}
-	result := &pb.MapCheckpoint{
-		MapId:      checkpoint.MapID,
-		NodeId:     checkpoint.NodeID,
-		MapEpoch:   checkpoint.MapEpoch,
-		Version:    checkpoint.Version,
-		Terrain:    append([]string(nil), checkpoint.Terrain...),
-		Checkpoint: checkpoint.Checkpoint.Format(time.RFC3339),
-		Players:    make([]*pb.PlayerView, 0, len(checkpoint.Players)),
-		Npcs:       make([]*pb.NPCView, 0, len(checkpoint.NPCs)),
-		Treasures:  make([]*pb.TreasureView, 0, len(checkpoint.Treasures)),
-	}
-	for _, player := range checkpoint.Players {
-		result.Players = append(result.Players, ToPlayerView(player))
-	}
-	for _, npc := range checkpoint.NPCs {
-		result.Npcs = append(result.Npcs, ToNPCView(npc))
-	}
-	for _, treasure := range checkpoint.Treasures {
-		result.Treasures = append(result.Treasures, ToTreasureView(treasure))
-	}
-	return result
-}
-
-func FromLegacyCheckpoint(checkpoint *pb.MapCheckpoint) protocol.MapCheckpoint {
-	if checkpoint == nil {
-		return protocol.MapCheckpoint{}
-	}
-	capturedAt, _ := time.Parse(time.RFC3339, checkpoint.GetCheckpoint())
-	result := protocol.MapCheckpoint{
-		MapID:      checkpoint.GetMapId(),
-		NodeID:     checkpoint.GetNodeId(),
-		MapEpoch:   checkpoint.GetMapEpoch(),
-		Version:    checkpoint.GetVersion(),
-		Terrain:    append([]string(nil), checkpoint.GetTerrain()...),
-		Checkpoint: capturedAt,
-		Players:    make([]protocol.PlayerView, 0, len(checkpoint.GetPlayers())),
-		NPCs:       make([]protocol.NPCView, 0, len(checkpoint.GetNpcs())),
-		Treasures:  make([]protocol.TreasureView, 0, len(checkpoint.GetTreasures())),
-	}
-	for _, player := range checkpoint.GetPlayers() {
-		result.Players = append(result.Players, FromPlayerView(player))
-	}
-	for _, npc := range checkpoint.GetNpcs() {
-		result.NPCs = append(result.NPCs, FromNPCView(npc))
-	}
-	for _, treasure := range checkpoint.GetTreasures() {
-		result.Treasures = append(result.Treasures, FromTreasureView(treasure))
-	}
-	return result
 }
 
 func DirectionFromString(direction string) (pb.Direction, error) {

@@ -39,51 +39,6 @@ func TestWorldStateRoundTripPreservesCompleteStateAndIsolation(t *testing.T) {
 		t.Fatal("领域还原与协议输入共享可变切片")
 	}
 }
-
-func TestLegacyMessageRoundTripPreservesCredentialsAndState(t *testing.T) {
-	state := gatewayTestWorldState()
-	original := protocol.Message{
-		Type:     protocol.TypeMove,
-		Action:   "move",
-		Username: "hero",
-		Password: "plaintext-is-v1-only",
-		Dir:      protocol.DirLeft,
-		MapID:    "green",
-		NodeID:   "node-a",
-		Confirm:  "yes",
-		Item:     "potion",
-		Text:     "moved",
-		OK:       true,
-		Error:    "",
-		State:    state,
-	}
-
-	wire := ToLegacyMessage(original)
-	if wire.GetPassword() != original.Password || wire.GetState().GetTopologyVersion() != original.State.TopologyVersion {
-		t.Fatalf("V1 message wire 字段缺失: %+v", wire)
-	}
-	original.State.Events[0] = "mutated-source-event"
-	actual := FromLegacyMessage(wire)
-	want := protocol.Message{
-		Type:     protocol.TypeMove,
-		Action:   "move",
-		Username: "hero",
-		Password: "plaintext-is-v1-only",
-		Dir:      protocol.DirLeft,
-		MapID:    "green",
-		NodeID:   "node-a",
-		Confirm:  "yes",
-		Item:     "potion",
-		Text:     "moved",
-		OK:       true,
-		Error:    "",
-		State:    gatewayTestWorldState(),
-	}
-	if !reflect.DeepEqual(actual, want) {
-		t.Fatalf("V1 Message 往返不一致:\n got:  %#v\n want: %#v", actual, want)
-	}
-}
-
 func gatewayTestWorldState() *protocol.WorldState {
 	return &protocol.WorldState{
 		Self: protocol.PlayerView{Username: "hero", MapID: "green", X: 3, Y: 4, HP: 95, MaxHP: 100, Attack: 12, Potions: 2, Treasures: 7, Kills: 8, Deaths: 1, Victories: 4, Alive: true, RespawnIn: 5, LastUpdate: "2026-09-10T16:00:00Z"},

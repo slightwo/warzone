@@ -7,7 +7,6 @@ import (
 	"log"
 	"math/rand"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,16 +20,12 @@ import (
 	_ "net/http/pprof"
 )
 
-const (
-	benchmarkProtocolV1 = "v1"
-	benchmarkProtocolV2 = "v2"
-)
+const benchmarkProtocol = "v2"
 
 var (
-	users           int
-	duration        int
-	gatewayAddr     string
-	protocolVersion string
+	users       int
+	duration    int
+	gatewayAddr string
 )
 
 func init() {
@@ -39,7 +34,6 @@ func init() {
 	flag.IntVar(&duration, "t", 30, "test duration in seconds")
 	flag.IntVar(&duration, "time", 30, "test duration in seconds")
 	flag.StringVar(&gatewayAddr, "addr", protocol.GatewayAddr, "Gateway address")
-	flag.StringVar(&protocolVersion, "protocol-version", benchmarkProtocolV2, "Gateway protocol version: v2 (default) or v1 (fallback)")
 }
 
 type benchmarkMetrics struct {
@@ -109,12 +103,8 @@ var dirs = []pb.Direction{
 
 func main() {
 	flag.Parse()
-	protocolVersion = strings.ToLower(strings.TrimSpace(protocolVersion))
-	if protocolVersion != benchmarkProtocolV1 && protocolVersion != benchmarkProtocolV2 {
-		log.Fatalf("unsupported protocol version %q: use v1 or v2", protocolVersion)
-	}
 
-	log.Printf("Starting %s benchmark with %d users for %d seconds against %s\n", protocolVersion, users, duration, gatewayAddr)
+	log.Printf("Starting V2 benchmark with %d users for %d seconds against %s\n", users, duration, gatewayAddr)
 
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(duration)*time.Second)
@@ -132,10 +122,6 @@ func main() {
 
 func runUser(ctx context.Context, wg *sync.WaitGroup, id int) {
 	defer wg.Done()
-	if protocolVersion == benchmarkProtocolV1 {
-		runV1User(ctx, id)
-		return
-	}
 	runV2User(ctx, id)
 }
 
@@ -253,103 +239,6 @@ func runV2User(ctx context.Context, id int) {
 	}
 }
 
-// runV1User remains an explicit rollback mode. Its timing is only an approximation:
-// V1 lacks request_id and therefore uses the next state frame as a completion proxy.
-func runV1User(ctx context.Context, id int) {
-	conn, err := grpc.NewClient(gatewayAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		metrics.transportErrors.Add(1)
-		return
-	}
-	defer conn.Close()
-
-	stream, err := pb.NewGatewayServiceClient(conn).GameStream(ctx)
-	if err != nil {
-		metrics.transportErrors.Add(1)
-		return
-	}
-	username := fmt.Sprintf("bench_v1_user_%d_%d", id, time.Now().UnixNano())
-	if err := stream.Send(&pb.Message{Type: protocol.TypeQuickEnter, Username: username, Password: "password"}); err != nil {
-		metrics.transportErrors.Add(1)
-		return
-	}
-	auth, err := stream.Recv()
-	if err != nil || auth.GetType() == protocol.TypeError || !auth.GetOk() {
-		metrics.commandRejected.Add(1)
-		return
-	}
-
-	currentUsers.Add(1)
-	updatePeak()
-	defer currentUsers.Add(-1)
-	defer stream.CloseSend()
-
-	var lastRequestAt time.Time
-	var lastRequestMu sync.Mutex
-	receiveDone := make(chan struct{})
-	go func() {
-		defer close(receiveDone)
-		for {
-			response, err := stream.Recv()
-			if err != nil {
-				return
-			}
-			if response.GetType() == protocol.TypeState {
-				metrics.stateUpdates.Add(1)
-				lastRequestMu.Lock()
-				startedAt := lastRequestAt
-				lastRequestAt = time.Time{}
-				lastRequestMu.Unlock()
-				if !startedAt.IsZero() {
-					metrics.commandConfirmed.Add(1)
-					metrics.addLatency(time.Since(startedAt))
-				}
-			} else if response.GetType() == protocol.TypeError {
-				metrics.commandRejected.Add(1)
-			}
-		}
-	}()
-
-	if err := stream.Send(&pb.Message{Type: protocol.TypeSwitchMap, MapId: maps[id%len(maps)]}); err != nil {
-		metrics.transportErrors.Add(1)
-		return
-	}
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-receiveDone:
-			metrics.transportErrors.Add(1)
-			return
-		case <-ticker.C:
-			lastRequestMu.Lock()
-			lastRequestAt = time.Now()
-			lastRequestMu.Unlock()
-			if err := stream.Send(&pb.Message{Type: protocol.TypeMove, Dir: v1Direction(dirs[rand.Intn(len(dirs))])}); err != nil {
-				metrics.transportErrors.Add(1)
-				return
-			}
-		}
-	}
-}
-
-func v1Direction(direction pb.Direction) string {
-	switch direction {
-	case pb.Direction_DIRECTION_UP:
-		return protocol.DirUp
-	case pb.Direction_DIRECTION_DOWN:
-		return protocol.DirDown
-	case pb.Direction_DIRECTION_LEFT:
-		return protocol.DirLeft
-	case pb.Direction_DIRECTION_RIGHT:
-		return protocol.DirRight
-	default:
-		return ""
-	}
-}
-
 func updatePeak() {
 	for {
 		current := currentUsers.Load()
@@ -371,7 +260,7 @@ func printMetrics(actualDuration time.Duration) {
 	total := confirmed + rejected + transportErrors
 
 	fmt.Println("\n========== 压测结果 ==========")
-	fmt.Printf("协议版本:       %s\n", protocolVersion)
+	fmt.Printf("协议版本:       %s\n", benchmarkProtocol)
 	fmt.Printf("并发用户数预设: %d\n", users)
 	fmt.Printf("峰值在线玩家数: %d\n", peakUsers.Load())
 	fmt.Printf("实际测试时间:   %v\n", actualDuration)

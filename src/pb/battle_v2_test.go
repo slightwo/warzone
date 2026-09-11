@@ -75,8 +75,6 @@ func TestServerEnvelopePayloadRoundTrip(t *testing.T) {
 func TestV2ContractShapeAndStableErrorCodes(t *testing.T) {
 	file := File_pb_battle_proto
 	gateway := findService(t, file, "GatewayService")
-	legacy := findMethod(t, gateway, "GameStream")
-	assertStreamingMethod(t, legacy, true, true, "Message", "Message")
 	v2 := findMethod(t, gateway, "GameStreamV2")
 	assertStreamingMethod(t, v2, true, true, "ClientEnvelope", "ServerEnvelope")
 
@@ -155,15 +153,17 @@ func TestV2ContractShapeAndStableErrorCodes(t *testing.T) {
 	}
 }
 
-func TestLegacyV1WireContractRemainsStable(t *testing.T) {
+func TestRetiredV1ContractIsAbsent(t *testing.T) {
 	file := File_pb_battle_proto
-	message := findMessage(t, file, "Message")
-	for name, number := range map[protoreflect.Name]protoreflect.FieldNumber{
-		"type": 1, "action": 2, "username": 3, "password": 4, "dir": 5,
-		"map_id": 6, "node_id": 7, "confirm": 8, "item": 9, "text": 10,
-		"ok": 11, "error": 12, "state": 13,
-	} {
-		assertFieldNumber(t, message, name, number)
+	if file.Messages().ByName("Message") != nil {
+		t.Fatal("V1 Message 不应保留在 protobuf 契约中")
+	}
+	if file.Services().ByName("NodeService") != nil {
+		t.Fatal("V1 NodeService 不应保留在 protobuf 契约中")
+	}
+	gateway := findService(t, file, "GatewayService")
+	if gateway.Methods().ByName("GameStream") != nil {
+		t.Fatal("V1 GatewayService.GameStream 不应保留在 protobuf 契约中")
 	}
 
 	worldState := findMessage(t, file, "WorldState")

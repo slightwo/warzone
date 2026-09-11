@@ -3,13 +3,10 @@ package node
 import (
 	"context"
 	"errors"
-	"expvar"
 	"fmt"
 	"strings"
-	"time"
 
 	"battleworld/pb"
-	"battleworld/protocol"
 	nodewire "battleworld/transport/node"
 	"battleworld/world"
 
@@ -18,165 +15,14 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// legacyNodeServiceCalls counts requests handled by the V1 Node service. It
-// is exposed from a node's lifecycle endpoint at /debug/vars and must remain
-// unchanged for a full release window before NodeService can be retired.
-var legacyNodeServiceCalls = expvar.NewInt("battleworld_node_v1_calls_total")
-
-// NodeGRPCServer serves the wire-compatible NodeService V1 while V2 callers
-// use the dedicated typed endpoint returned by NewNodeV2GRPCServer.
-type NodeGRPCServer struct {
-	pb.UnimplementedNodeServiceServer
-	svc *NodeService
-}
-
-func NewNodeGRPCServer(svc *NodeService) *NodeGRPCServer {
-	return &NodeGRPCServer{svc: svc}
-}
-
-func (s *NodeGRPCServer) recordLegacyCall() {
-	legacyNodeServiceCalls.Add(1)
-}
-
-func (s *NodeGRPCServer) Ping(context.Context, *pb.PingReq) (*pb.PingResp, error) {
-	s.recordLegacyCall()
-	return &pb.PingResp{Ts: time.Now().UnixMilli()}, nil
-}
-
-func (s *NodeGRPCServer) AddPlayer(ctx context.Context, req *pb.AddPlayerReq) (*pb.AddPlayerResp, error) {
-	s.recordLegacyCall()
-	profile := legacyUserProfileFromPB(req.GetProfile())
-	if err := s.svc.AddPlayer(ctx, req.GetMapId(), req.GetMapEpoch(), &profile); err != nil {
-		return nil, grpcAuthorityError(err)
-	}
-	return &pb.AddPlayerResp{Ok: true}, nil
-}
-
-func (s *NodeGRPCServer) RemovePlayer(ctx context.Context, req *pb.RemovePlayerReq) (*pb.RemovePlayerResp, error) {
-	s.recordLegacyCall()
-	profile, ok, err := s.svc.RemovePlayer(ctx, req.GetMapId(), req.GetUsername(), req.GetMapEpoch())
-	if err != nil {
-		return nil, grpcAuthorityError(err)
-	}
-	return &pb.RemovePlayerResp{Profile: legacyUserProfileToPB(profile), Ok: ok}, nil
-}
-
-func (s *NodeGRPCServer) MovePlayer(ctx context.Context, req *pb.MovePlayerReq) (*pb.MovePlayerResp, error) {
-	s.recordLegacyCall()
-	text, profile, ok, err := s.svc.MovePlayer(ctx, req.GetMapId(), req.GetUsername(), req.GetDir(), req.GetMapEpoch())
-	if err != nil {
-		return nil, grpcAuthorityError(err)
-	}
-	return &pb.MovePlayerResp{Text: text, Profile: legacyUserProfileToPB(profile), Ok: ok}, nil
-}
-
-func (s *NodeGRPCServer) Attack(ctx context.Context, req *pb.AttackReq) (*pb.AttackResp, error) {
-	s.recordLegacyCall()
-	log1, log2, log3, profile, ok, err := s.svc.Attack(ctx, req.GetMapId(), req.GetUsername(), req.GetMapEpoch())
-	if err != nil {
-		return nil, grpcAuthorityError(err)
-	}
-	return &pb.AttackResp{Log: log1, BLog: log2, GmLog: log3, Profile: legacyUserProfileToPB(profile), Ok: ok}, nil
-}
-
-func (s *NodeGRPCServer) Heal(ctx context.Context, req *pb.HealReq) (*pb.HealResp, error) {
-	s.recordLegacyCall()
-	text, profile, ok, err := s.svc.Heal(ctx, req.GetMapId(), req.GetUsername(), req.GetMapEpoch())
-	if err != nil {
-		return nil, grpcAuthorityError(err)
-	}
-	return &pb.HealResp{Text: text, Profile: legacyUserProfileToPB(profile), Ok: ok}, nil
-}
-
-func (s *NodeGRPCServer) BuyItem(ctx context.Context, req *pb.BuyItemReq) (*pb.BuyItemResp, error) {
-	s.recordLegacyCall()
-	text, profile, ok, err := s.svc.BuyItem(ctx, req.GetMapId(), req.GetUsername(), req.GetItem(), req.GetMapEpoch())
-	if err != nil {
-		return nil, grpcAuthorityError(err)
-	}
-	return &pb.BuyItemResp{Text: text, Profile: legacyUserProfileToPB(profile), Ok: ok}, nil
-}
-
-func (s *NodeGRPCServer) AttackBoss(ctx context.Context, req *pb.AttackBossReq) (*pb.AttackBossResp, error) {
-	s.recordLegacyCall()
-	text, profile, ok, err := s.svc.AttackBoss(ctx, req.GetMapId(), req.GetUsername(), req.GetMapEpoch())
-	if err != nil {
-		return nil, grpcAuthorityError(err)
-	}
-	return &pb.AttackBossResp{Text: text, Profile: legacyUserProfileToPB(profile), Ok: ok}, nil
-}
-
-func (s *NodeGRPCServer) Profile(ctx context.Context, req *pb.ProfileReq) (*pb.ProfileResp, error) {
-	s.recordLegacyCall()
-	profile, ok, err := s.svc.Profile(ctx, req.GetMapId(), req.GetUsername())
-	if err != nil {
-		return nil, err
-	}
-	return &pb.ProfileResp{Profile: legacyUserProfileToPB(profile), Ok: ok}, nil
-}
-
-func (s *NodeGRPCServer) RewardPlayer(ctx context.Context, req *pb.RewardPlayerReq) (*pb.RewardPlayerResp, error) {
-	s.recordLegacyCall()
-	profile, ok, err := s.svc.RewardPlayer(ctx, req.GetMapId(), req.GetUsername(), int(req.GetTreasureDelta()), int(req.GetVictoryDelta()), req.GetMapEpoch())
-	if err != nil {
-		return nil, grpcAuthorityError(err)
-	}
-	return &pb.RewardPlayerResp{Profile: legacyUserProfileToPB(profile), Ok: ok}, nil
-}
-
-func (s *NodeGRPCServer) Snapshot(ctx context.Context, req *pb.SnapshotReq) (*pb.SnapshotResp, error) {
-	s.recordLegacyCall()
-	view, err := s.svc.Snapshot(ctx, req.GetMapId())
-	if err != nil {
-		return nil, err
-	}
-	return &pb.SnapshotResp{Map: nodewire.ToMapView(view)}, nil
-}
-
-func (s *NodeGRPCServer) Counts(ctx context.Context, req *pb.CountsReq) (*pb.CountsResp, error) {
-	s.recordLegacyCall()
-	players, npcs, treasures, version, err := s.svc.Counts(ctx, req.GetMapId())
-	if err != nil {
-		return nil, err
-	}
-	return &pb.CountsResp{Players: int32(players), Npcs: int32(npcs), Treasures: int32(treasures), Version: version}, nil
-}
-
-func (s *NodeGRPCServer) Checkpoint(ctx context.Context, req *pb.CheckpointReq) (*pb.CheckpointResp, error) {
-	s.recordLegacyCall()
-	checkpoint, err := s.svc.Checkpoint(ctx, req.GetMapId())
-	if err != nil {
-		return nil, err
-	}
-	return &pb.CheckpointResp{Checkpoint: legacyCheckpointToPB(checkpoint)}, nil
-}
-
-func (s *NodeGRPCServer) Promote(ctx context.Context, req *pb.PromoteReq) (*pb.PromoteResp, error) {
-	s.recordLegacyCall()
-	config, err := nodeMapConfig(req.GetMapId())
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-	if err := s.svc.Promote(req.GetMapId(), config, legacyCheckpointFromPB(req.GetCheckpoint()), req.GetMapEpoch()); err != nil {
-		return nil, grpcAuthorityError(err)
-	}
-	return &pb.PromoteResp{Ok: true}, nil
-}
-
-func (s *NodeGRPCServer) View(context.Context, *pb.ViewReq) (*pb.ViewResp, error) {
-	s.recordLegacyCall()
-	return &pb.ViewResp{View: nodewire.ToNodeView(s.svc.View())}, nil
-}
-
-// nodeV2GRPCServer serves NodeServiceV2 separately because Ping has the same
-// method name but a different request/response type in the V1 service.
+// nodeV2GRPCServer serves the typed NodeServiceV2 endpoint.
 type nodeV2GRPCServer struct {
 	pb.UnimplementedNodeServiceV2Server
 	svc *NodeService
 }
 
-// NewNodeV2GRPCServer returns the V2 endpoint backed by the same local node
-// service as its legacy counterpart. Both can be registered on one grpc.Server.
+// NewNodeV2GRPCServer returns the NodeServiceV2 endpoint backed by the local
+// node service. Every data-plane mutation carries MapAuthority.
 func NewNodeV2GRPCServer(svc *NodeService) pb.NodeServiceV2Server {
 	return &nodeV2GRPCServer{svc: svc}
 }
@@ -383,52 +229,4 @@ func grpcAuthorityError(err error) error {
 		return status.Error(codes.FailedPrecondition, err.Error())
 	}
 	return err
-}
-
-// V1 UserProfile remains an account-bearing compatibility model. It must not be
-// used by NodeServiceV2, which exclusively uses transport/node.PlayerState.
-func legacyUserProfileToPB(profile protocol.UserProfile) *pb.UserProfile {
-	return &pb.UserProfile{Username: profile.Username, PasswordHash: profile.PasswordHash, LastMap: profile.LastMap, LastNode: profile.LastNode, X: int32(profile.X), Y: int32(profile.Y), Hp: int32(profile.HP), MaxHp: int32(profile.MaxHP), Attack: int32(profile.Attack), Potions: int32(profile.Potions), Treasures: int32(profile.Treasures), Kills: int32(profile.Kills), Deaths: int32(profile.Deaths), Victories: int32(profile.Victories), Alive: profile.Alive}
-}
-
-func legacyUserProfileFromPB(profile *pb.UserProfile) protocol.UserProfile {
-	if profile == nil {
-		return protocol.UserProfile{}
-	}
-	return protocol.UserProfile{Username: profile.GetUsername(), PasswordHash: profile.GetPasswordHash(), LastMap: profile.GetLastMap(), LastNode: profile.GetLastNode(), X: int(profile.GetX()), Y: int(profile.GetY()), HP: int(profile.GetHp()), MaxHP: int(profile.GetMaxHp()), Attack: int(profile.GetAttack()), Potions: int(profile.GetPotions()), Treasures: int(profile.GetTreasures()), Kills: int(profile.GetKills()), Deaths: int(profile.GetDeaths()), Victories: int(profile.GetVictories()), Alive: profile.GetAlive()}
-}
-
-func legacyCheckpointToPB(checkpoint protocol.MapCheckpoint) *pb.MapCheckpoint {
-	if checkpoint.MapID == "" {
-		return nil
-	}
-	result := &pb.MapCheckpoint{MapId: checkpoint.MapID, NodeId: checkpoint.NodeID, MapEpoch: checkpoint.MapEpoch, Version: checkpoint.Version, Terrain: append([]string(nil), checkpoint.Terrain...), Checkpoint: checkpoint.Checkpoint.Format(time.RFC3339)}
-	for _, player := range checkpoint.Players {
-		result.Players = append(result.Players, nodewire.ToPlayerView(player))
-	}
-	for _, npc := range checkpoint.NPCs {
-		result.Npcs = append(result.Npcs, nodewire.ToNPCView(npc))
-	}
-	for _, treasure := range checkpoint.Treasures {
-		result.Treasures = append(result.Treasures, nodewire.ToTreasureView(treasure))
-	}
-	return result
-}
-
-func legacyCheckpointFromPB(checkpoint *pb.MapCheckpoint) protocol.MapCheckpoint {
-	if checkpoint == nil {
-		return protocol.MapCheckpoint{}
-	}
-	capturedAt, _ := time.Parse(time.RFC3339, checkpoint.GetCheckpoint())
-	result := protocol.MapCheckpoint{MapID: checkpoint.GetMapId(), NodeID: checkpoint.GetNodeId(), MapEpoch: checkpoint.GetMapEpoch(), Version: checkpoint.GetVersion(), Terrain: append([]string(nil), checkpoint.GetTerrain()...), Checkpoint: capturedAt}
-	for _, player := range checkpoint.GetPlayers() {
-		result.Players = append(result.Players, nodewire.FromPlayerView(player))
-	}
-	for _, npc := range checkpoint.GetNpcs() {
-		result.NPCs = append(result.NPCs, nodewire.FromNPCView(npc))
-	}
-	for _, treasure := range checkpoint.GetTreasures() {
-		result.Treasures = append(result.Treasures, nodewire.FromTreasureView(treasure))
-	}
-	return result
 }

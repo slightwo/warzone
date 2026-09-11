@@ -144,17 +144,6 @@ func (c *Cluster) Register(username, password, confirm string) error {
 	return c.store.Register(username, password)
 }
 
-func (c *Cluster) ExecuteAdmin(action, _ string) (string, error) {
-	switch action {
-	case "status", "状态":
-		return c.adminStatus(), nil
-	case "fail", "down", "故障", "recover", "up", "恢复":
-		return "", errors.New("节点故障与恢复管理已迁入 coordinator；gateway 仅提供只读状态")
-	default:
-		return "", fmt.Errorf("未知管理动作：%s", action)
-	}
-}
-
 func (c *Cluster) QuickEnter(username, password string) (*protocol.WorldState, error) {
 	if err := c.Register(username, password, password); err != nil {
 		if !strings.Contains(err.Error(), "已存在") {

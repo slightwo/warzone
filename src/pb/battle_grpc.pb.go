@@ -19,7 +19,6 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	GatewayService_GameStream_FullMethodName   = "/pb.GatewayService/GameStream"
 	GatewayService_GameStreamV2_FullMethodName = "/pb.GatewayService/GameStreamV2"
 )
 
@@ -27,12 +26,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// GatewayService exposes both the legacy V1 stream and the typed V2 stream during
-// migration. GameStream must remain wire compatible until all V1 callers migrate.
+// GatewayService exposes the typed bidirectional game stream.
 type GatewayServiceClient interface {
-	// Legacy V1 stream. Do not change Message tags or this RPC name.
-	GameStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[Message, Message], error)
-	// Typed V2 stream. Each envelope has an explicit oneof payload.
 	GameStreamV2(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientEnvelope, ServerEnvelope], error)
 }
 
@@ -44,22 +39,9 @@ func NewGatewayServiceClient(cc grpc.ClientConnInterface) GatewayServiceClient {
 	return &gatewayServiceClient{cc}
 }
 
-func (c *gatewayServiceClient) GameStream(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[Message, Message], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &GatewayService_ServiceDesc.Streams[0], GatewayService_GameStream_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[Message, Message]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type GatewayService_GameStreamClient = grpc.BidiStreamingClient[Message, Message]
-
 func (c *gatewayServiceClient) GameStreamV2(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ClientEnvelope, ServerEnvelope], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &GatewayService_ServiceDesc.Streams[1], GatewayService_GameStreamV2_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &GatewayService_ServiceDesc.Streams[0], GatewayService_GameStreamV2_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -74,12 +56,8 @@ type GatewayService_GameStreamV2Client = grpc.BidiStreamingClient[ClientEnvelope
 // All implementations must embed UnimplementedGatewayServiceServer
 // for forward compatibility.
 //
-// GatewayService exposes both the legacy V1 stream and the typed V2 stream during
-// migration. GameStream must remain wire compatible until all V1 callers migrate.
+// GatewayService exposes the typed bidirectional game stream.
 type GatewayServiceServer interface {
-	// Legacy V1 stream. Do not change Message tags or this RPC name.
-	GameStream(grpc.BidiStreamingServer[Message, Message]) error
-	// Typed V2 stream. Each envelope has an explicit oneof payload.
 	GameStreamV2(grpc.BidiStreamingServer[ClientEnvelope, ServerEnvelope]) error
 	mustEmbedUnimplementedGatewayServiceServer()
 }
@@ -91,9 +69,6 @@ type GatewayServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedGatewayServiceServer struct{}
 
-func (UnimplementedGatewayServiceServer) GameStream(grpc.BidiStreamingServer[Message, Message]) error {
-	return status.Errorf(codes.Unimplemented, "method GameStream not implemented")
-}
 func (UnimplementedGatewayServiceServer) GameStreamV2(grpc.BidiStreamingServer[ClientEnvelope, ServerEnvelope]) error {
 	return status.Errorf(codes.Unimplemented, "method GameStreamV2 not implemented")
 }
@@ -118,13 +93,6 @@ func RegisterGatewayServiceServer(s grpc.ServiceRegistrar, srv GatewayServiceSer
 	s.RegisterService(&GatewayService_ServiceDesc, srv)
 }
 
-func _GatewayService_GameStream_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(GatewayServiceServer).GameStream(&grpc.GenericServerStream[Message, Message]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type GatewayService_GameStreamServer = grpc.BidiStreamingServer[Message, Message]
-
 func _GatewayService_GameStreamV2_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(GatewayServiceServer).GameStreamV2(&grpc.GenericServerStream[ClientEnvelope, ServerEnvelope]{ServerStream: stream})
 }
@@ -140,12 +108,6 @@ var GatewayService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*GatewayServiceServer)(nil),
 	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "GameStream",
-			Handler:       _GatewayService_GameStream_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
-		},
 		{
 			StreamName:    "GameStreamV2",
 			Handler:       _GatewayService_GameStreamV2_Handler,
@@ -265,640 +227,6 @@ var AdminService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	NodeService_Ping_FullMethodName         = "/pb.NodeService/Ping"
-	NodeService_AddPlayer_FullMethodName    = "/pb.NodeService/AddPlayer"
-	NodeService_RemovePlayer_FullMethodName = "/pb.NodeService/RemovePlayer"
-	NodeService_MovePlayer_FullMethodName   = "/pb.NodeService/MovePlayer"
-	NodeService_Attack_FullMethodName       = "/pb.NodeService/Attack"
-	NodeService_Heal_FullMethodName         = "/pb.NodeService/Heal"
-	NodeService_BuyItem_FullMethodName      = "/pb.NodeService/BuyItem"
-	NodeService_Profile_FullMethodName      = "/pb.NodeService/Profile"
-	NodeService_RewardPlayer_FullMethodName = "/pb.NodeService/RewardPlayer"
-	NodeService_Snapshot_FullMethodName     = "/pb.NodeService/Snapshot"
-	NodeService_Counts_FullMethodName       = "/pb.NodeService/Counts"
-	NodeService_Checkpoint_FullMethodName   = "/pb.NodeService/Checkpoint"
-	NodeService_AttackBoss_FullMethodName   = "/pb.NodeService/AttackBoss"
-	NodeService_Promote_FullMethodName      = "/pb.NodeService/Promote"
-	NodeService_View_FullMethodName         = "/pb.NodeService/View"
-)
-
-// NodeServiceClient is the client API for NodeService service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type NodeServiceClient interface {
-	Ping(ctx context.Context, in *PingReq, opts ...grpc.CallOption) (*PingResp, error)
-	AddPlayer(ctx context.Context, in *AddPlayerReq, opts ...grpc.CallOption) (*AddPlayerResp, error)
-	RemovePlayer(ctx context.Context, in *RemovePlayerReq, opts ...grpc.CallOption) (*RemovePlayerResp, error)
-	MovePlayer(ctx context.Context, in *MovePlayerReq, opts ...grpc.CallOption) (*MovePlayerResp, error)
-	Attack(ctx context.Context, in *AttackReq, opts ...grpc.CallOption) (*AttackResp, error)
-	Heal(ctx context.Context, in *HealReq, opts ...grpc.CallOption) (*HealResp, error)
-	BuyItem(ctx context.Context, in *BuyItemReq, opts ...grpc.CallOption) (*BuyItemResp, error)
-	Profile(ctx context.Context, in *ProfileReq, opts ...grpc.CallOption) (*ProfileResp, error)
-	RewardPlayer(ctx context.Context, in *RewardPlayerReq, opts ...grpc.CallOption) (*RewardPlayerResp, error)
-	Snapshot(ctx context.Context, in *SnapshotReq, opts ...grpc.CallOption) (*SnapshotResp, error)
-	Counts(ctx context.Context, in *CountsReq, opts ...grpc.CallOption) (*CountsResp, error)
-	Checkpoint(ctx context.Context, in *CheckpointReq, opts ...grpc.CallOption) (*CheckpointResp, error)
-	AttackBoss(ctx context.Context, in *AttackBossReq, opts ...grpc.CallOption) (*AttackBossResp, error)
-	Promote(ctx context.Context, in *PromoteReq, opts ...grpc.CallOption) (*PromoteResp, error)
-	View(ctx context.Context, in *ViewReq, opts ...grpc.CallOption) (*ViewResp, error)
-}
-
-type nodeServiceClient struct {
-	cc grpc.ClientConnInterface
-}
-
-func NewNodeServiceClient(cc grpc.ClientConnInterface) NodeServiceClient {
-	return &nodeServiceClient{cc}
-}
-
-func (c *nodeServiceClient) Ping(ctx context.Context, in *PingReq, opts ...grpc.CallOption) (*PingResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PingResp)
-	err := c.cc.Invoke(ctx, NodeService_Ping_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) AddPlayer(ctx context.Context, in *AddPlayerReq, opts ...grpc.CallOption) (*AddPlayerResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AddPlayerResp)
-	err := c.cc.Invoke(ctx, NodeService_AddPlayer_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) RemovePlayer(ctx context.Context, in *RemovePlayerReq, opts ...grpc.CallOption) (*RemovePlayerResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RemovePlayerResp)
-	err := c.cc.Invoke(ctx, NodeService_RemovePlayer_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) MovePlayer(ctx context.Context, in *MovePlayerReq, opts ...grpc.CallOption) (*MovePlayerResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MovePlayerResp)
-	err := c.cc.Invoke(ctx, NodeService_MovePlayer_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) Attack(ctx context.Context, in *AttackReq, opts ...grpc.CallOption) (*AttackResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AttackResp)
-	err := c.cc.Invoke(ctx, NodeService_Attack_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) Heal(ctx context.Context, in *HealReq, opts ...grpc.CallOption) (*HealResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HealResp)
-	err := c.cc.Invoke(ctx, NodeService_Heal_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) BuyItem(ctx context.Context, in *BuyItemReq, opts ...grpc.CallOption) (*BuyItemResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(BuyItemResp)
-	err := c.cc.Invoke(ctx, NodeService_BuyItem_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) Profile(ctx context.Context, in *ProfileReq, opts ...grpc.CallOption) (*ProfileResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ProfileResp)
-	err := c.cc.Invoke(ctx, NodeService_Profile_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) RewardPlayer(ctx context.Context, in *RewardPlayerReq, opts ...grpc.CallOption) (*RewardPlayerResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RewardPlayerResp)
-	err := c.cc.Invoke(ctx, NodeService_RewardPlayer_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) Snapshot(ctx context.Context, in *SnapshotReq, opts ...grpc.CallOption) (*SnapshotResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SnapshotResp)
-	err := c.cc.Invoke(ctx, NodeService_Snapshot_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) Counts(ctx context.Context, in *CountsReq, opts ...grpc.CallOption) (*CountsResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CountsResp)
-	err := c.cc.Invoke(ctx, NodeService_Counts_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) Checkpoint(ctx context.Context, in *CheckpointReq, opts ...grpc.CallOption) (*CheckpointResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CheckpointResp)
-	err := c.cc.Invoke(ctx, NodeService_Checkpoint_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) AttackBoss(ctx context.Context, in *AttackBossReq, opts ...grpc.CallOption) (*AttackBossResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AttackBossResp)
-	err := c.cc.Invoke(ctx, NodeService_AttackBoss_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) Promote(ctx context.Context, in *PromoteReq, opts ...grpc.CallOption) (*PromoteResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PromoteResp)
-	err := c.cc.Invoke(ctx, NodeService_Promote_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *nodeServiceClient) View(ctx context.Context, in *ViewReq, opts ...grpc.CallOption) (*ViewResp, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ViewResp)
-	err := c.cc.Invoke(ctx, NodeService_View_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// NodeServiceServer is the server API for NodeService service.
-// All implementations must embed UnimplementedNodeServiceServer
-// for forward compatibility.
-type NodeServiceServer interface {
-	Ping(context.Context, *PingReq) (*PingResp, error)
-	AddPlayer(context.Context, *AddPlayerReq) (*AddPlayerResp, error)
-	RemovePlayer(context.Context, *RemovePlayerReq) (*RemovePlayerResp, error)
-	MovePlayer(context.Context, *MovePlayerReq) (*MovePlayerResp, error)
-	Attack(context.Context, *AttackReq) (*AttackResp, error)
-	Heal(context.Context, *HealReq) (*HealResp, error)
-	BuyItem(context.Context, *BuyItemReq) (*BuyItemResp, error)
-	Profile(context.Context, *ProfileReq) (*ProfileResp, error)
-	RewardPlayer(context.Context, *RewardPlayerReq) (*RewardPlayerResp, error)
-	Snapshot(context.Context, *SnapshotReq) (*SnapshotResp, error)
-	Counts(context.Context, *CountsReq) (*CountsResp, error)
-	Checkpoint(context.Context, *CheckpointReq) (*CheckpointResp, error)
-	AttackBoss(context.Context, *AttackBossReq) (*AttackBossResp, error)
-	Promote(context.Context, *PromoteReq) (*PromoteResp, error)
-	View(context.Context, *ViewReq) (*ViewResp, error)
-	mustEmbedUnimplementedNodeServiceServer()
-}
-
-// UnimplementedNodeServiceServer must be embedded to have
-// forward compatible implementations.
-//
-// NOTE: this should be embedded by value instead of pointer to avoid a nil
-// pointer dereference when methods are called.
-type UnimplementedNodeServiceServer struct{}
-
-func (UnimplementedNodeServiceServer) Ping(context.Context, *PingReq) (*PingResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Ping not implemented")
-}
-func (UnimplementedNodeServiceServer) AddPlayer(context.Context, *AddPlayerReq) (*AddPlayerResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method AddPlayer not implemented")
-}
-func (UnimplementedNodeServiceServer) RemovePlayer(context.Context, *RemovePlayerReq) (*RemovePlayerResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RemovePlayer not implemented")
-}
-func (UnimplementedNodeServiceServer) MovePlayer(context.Context, *MovePlayerReq) (*MovePlayerResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method MovePlayer not implemented")
-}
-func (UnimplementedNodeServiceServer) Attack(context.Context, *AttackReq) (*AttackResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Attack not implemented")
-}
-func (UnimplementedNodeServiceServer) Heal(context.Context, *HealReq) (*HealResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Heal not implemented")
-}
-func (UnimplementedNodeServiceServer) BuyItem(context.Context, *BuyItemReq) (*BuyItemResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method BuyItem not implemented")
-}
-func (UnimplementedNodeServiceServer) Profile(context.Context, *ProfileReq) (*ProfileResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Profile not implemented")
-}
-func (UnimplementedNodeServiceServer) RewardPlayer(context.Context, *RewardPlayerReq) (*RewardPlayerResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RewardPlayer not implemented")
-}
-func (UnimplementedNodeServiceServer) Snapshot(context.Context, *SnapshotReq) (*SnapshotResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Snapshot not implemented")
-}
-func (UnimplementedNodeServiceServer) Counts(context.Context, *CountsReq) (*CountsResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Counts not implemented")
-}
-func (UnimplementedNodeServiceServer) Checkpoint(context.Context, *CheckpointReq) (*CheckpointResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Checkpoint not implemented")
-}
-func (UnimplementedNodeServiceServer) AttackBoss(context.Context, *AttackBossReq) (*AttackBossResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method AttackBoss not implemented")
-}
-func (UnimplementedNodeServiceServer) Promote(context.Context, *PromoteReq) (*PromoteResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Promote not implemented")
-}
-func (UnimplementedNodeServiceServer) View(context.Context, *ViewReq) (*ViewResp, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method View not implemented")
-}
-func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
-func (UnimplementedNodeServiceServer) testEmbeddedByValue()                     {}
-
-// UnsafeNodeServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to NodeServiceServer will
-// result in compilation errors.
-type UnsafeNodeServiceServer interface {
-	mustEmbedUnimplementedNodeServiceServer()
-}
-
-func RegisterNodeServiceServer(s grpc.ServiceRegistrar, srv NodeServiceServer) {
-	// If the following call pancis, it indicates UnimplementedNodeServiceServer was
-	// embedded by pointer and is nil.  This will cause panics if an
-	// unimplemented method is ever invoked, so we test this at initialization
-	// time to prevent it from happening at runtime later due to I/O.
-	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
-		t.testEmbeddedByValue()
-	}
-	s.RegisterService(&NodeService_ServiceDesc, srv)
-}
-
-func _NodeService_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PingReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).Ping(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_Ping_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).Ping(ctx, req.(*PingReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_AddPlayer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AddPlayerReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).AddPlayer(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_AddPlayer_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).AddPlayer(ctx, req.(*AddPlayerReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_RemovePlayer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RemovePlayerReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).RemovePlayer(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_RemovePlayer_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).RemovePlayer(ctx, req.(*RemovePlayerReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_MovePlayer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MovePlayerReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).MovePlayer(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_MovePlayer_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).MovePlayer(ctx, req.(*MovePlayerReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_Attack_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AttackReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).Attack(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_Attack_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).Attack(ctx, req.(*AttackReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_Heal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HealReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).Heal(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_Heal_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).Heal(ctx, req.(*HealReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_BuyItem_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BuyItemReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).BuyItem(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_BuyItem_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).BuyItem(ctx, req.(*BuyItemReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_Profile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ProfileReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).Profile(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_Profile_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).Profile(ctx, req.(*ProfileReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_RewardPlayer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RewardPlayerReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).RewardPlayer(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_RewardPlayer_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).RewardPlayer(ctx, req.(*RewardPlayerReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_Snapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SnapshotReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).Snapshot(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_Snapshot_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).Snapshot(ctx, req.(*SnapshotReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_Counts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CountsReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).Counts(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_Counts_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).Counts(ctx, req.(*CountsReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_Checkpoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CheckpointReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).Checkpoint(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_Checkpoint_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).Checkpoint(ctx, req.(*CheckpointReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_AttackBoss_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AttackBossReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).AttackBoss(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_AttackBoss_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).AttackBoss(ctx, req.(*AttackBossReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_Promote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PromoteReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).Promote(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_Promote_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).Promote(ctx, req.(*PromoteReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _NodeService_View_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ViewReq)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(NodeServiceServer).View(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: NodeService_View_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(NodeServiceServer).View(ctx, req.(*ViewReq))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-// NodeService_ServiceDesc is the grpc.ServiceDesc for NodeService service.
-// It's only intended for direct use with grpc.RegisterService,
-// and not to be introspected or modified (even as a copy)
-var NodeService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "pb.NodeService",
-	HandlerType: (*NodeServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "Ping",
-			Handler:    _NodeService_Ping_Handler,
-		},
-		{
-			MethodName: "AddPlayer",
-			Handler:    _NodeService_AddPlayer_Handler,
-		},
-		{
-			MethodName: "RemovePlayer",
-			Handler:    _NodeService_RemovePlayer_Handler,
-		},
-		{
-			MethodName: "MovePlayer",
-			Handler:    _NodeService_MovePlayer_Handler,
-		},
-		{
-			MethodName: "Attack",
-			Handler:    _NodeService_Attack_Handler,
-		},
-		{
-			MethodName: "Heal",
-			Handler:    _NodeService_Heal_Handler,
-		},
-		{
-			MethodName: "BuyItem",
-			Handler:    _NodeService_BuyItem_Handler,
-		},
-		{
-			MethodName: "Profile",
-			Handler:    _NodeService_Profile_Handler,
-		},
-		{
-			MethodName: "RewardPlayer",
-			Handler:    _NodeService_RewardPlayer_Handler,
-		},
-		{
-			MethodName: "Snapshot",
-			Handler:    _NodeService_Snapshot_Handler,
-		},
-		{
-			MethodName: "Counts",
-			Handler:    _NodeService_Counts_Handler,
-		},
-		{
-			MethodName: "Checkpoint",
-			Handler:    _NodeService_Checkpoint_Handler,
-		},
-		{
-			MethodName: "AttackBoss",
-			Handler:    _NodeService_AttackBoss_Handler,
-		},
-		{
-			MethodName: "Promote",
-			Handler:    _NodeService_Promote_Handler,
-		},
-		{
-			MethodName: "View",
-			Handler:    _NodeService_View_Handler,
-		},
-	},
-	Streams:  []grpc.StreamDesc{},
-	Metadata: "pb/battle.proto",
-}
-
-const (
 	NodeServiceV2_Ping_FullMethodName         = "/pb.NodeServiceV2/Ping"
 	NodeServiceV2_AddPlayer_FullMethodName    = "/pb.NodeServiceV2/AddPlayer"
 	NodeServiceV2_RemovePlayer_FullMethodName = "/pb.NodeServiceV2/RemovePlayer"
@@ -921,9 +249,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // NodeServiceV2 is the typed Node RPC contract used by Gateway and Coordinator.
-// It is served alongside NodeService during the compatibility window. Every map
-// mutation carries MapAuthority so the node can fence stale owners before world
-// state changes; no Node V2 payload includes an account password hash.
+// Every map mutation carries MapAuthority so the node can fence stale owners before
+// world state changes; no Node data-plane payload includes an account password hash.
 type NodeServiceV2Client interface {
 	Ping(ctx context.Context, in *NodePingRequest, opts ...grpc.CallOption) (*NodePingResponse, error)
 	AddPlayer(ctx context.Context, in *NodeAddPlayerRequest, opts ...grpc.CallOption) (*NodeAddPlayerResponse, error)
@@ -1105,9 +432,8 @@ func (c *nodeServiceV2Client) View(ctx context.Context, in *NodeViewRequest, opt
 // for forward compatibility.
 //
 // NodeServiceV2 is the typed Node RPC contract used by Gateway and Coordinator.
-// It is served alongside NodeService during the compatibility window. Every map
-// mutation carries MapAuthority so the node can fence stale owners before world
-// state changes; no Node V2 payload includes an account password hash.
+// Every map mutation carries MapAuthority so the node can fence stale owners before
+// world state changes; no Node data-plane payload includes an account password hash.
 type NodeServiceV2Server interface {
 	Ping(context.Context, *NodePingRequest) (*NodePingResponse, error)
 	AddPlayer(context.Context, *NodeAddPlayerRequest) (*NodeAddPlayerResponse, error)

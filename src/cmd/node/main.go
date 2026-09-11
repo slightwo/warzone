@@ -92,17 +92,13 @@ func main() {
 		}
 	}
 
-	grpcNode := node.NewNodeGRPCServer(ns)
-
 	lis, err := net.Listen("tcp", nodeAddr)
 	if err != nil {
 		log.Fatalf("无法监听端口 %s: %v", nodeAddr, err)
 	}
 
 	grpcServer := grpc.NewServer()
-	// 在兼容窗口内同一节点同时服务 V1 与 V2；Gateway/Coordinator 已切换到
-	// NodeServiceV2，而旧二进制仍可继续调用 NodeService。
-	pb.RegisterNodeServiceServer(grpcServer, grpcNode)
+	// Node 数据面仅服务带 authority 和 typed payload 的 NodeServiceV2。
 	pb.RegisterNodeServiceV2Server(grpcServer, node.NewNodeV2GRPCServer(ns))
 
 	// 如果有 Redis，则开启心跳上报线程。drain 状态会随下一次租约续期被 coordinator 和

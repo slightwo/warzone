@@ -27,24 +27,6 @@ const (
 )
 
 const (
-	TypeRegister   = "register"
-	TypeLogin      = "login"
-	TypeQuickEnter = "quick_enter"
-	TypeLogout     = "logout"
-	TypeMove       = "move"
-	TypeAttack     = "attack"
-	TypeBossAttack = "boss_attack"
-	TypeHeal       = "heal"
-	TypeShop       = "shop"
-	TypeSwitchMap  = "switch_map"
-	TypeAdmin      = "admin"
-
-	TypeAuth  = "auth"
-	TypeState = "state"
-	TypeError = "error"
-)
-
-const (
 	DirUp    = "up"
 	DirDown  = "down"
 	DirLeft  = "left"
@@ -211,22 +193,6 @@ type MapCheckpoint struct {
 	NPCs       []NPCView      `json:"npcs"`
 	Treasures  []TreasureView `json:"treasures"`
 	Checkpoint time.Time      `json:"checkpoint"`
-}
-
-type Message struct {
-	Type     string      `json:"type"`
-	Action   string      `json:"action,omitempty"`
-	Username string      `json:"username,omitempty"`
-	Password string      `json:"password,omitempty"`
-	Dir      string      `json:"dir,omitempty"`
-	MapID    string      `json:"map_id,omitempty"`
-	NodeID   string      `json:"node_id,omitempty"`
-	Confirm  string      `json:"confirm,omitempty"`
-	Item     string      `json:"item,omitempty"`
-	Text     string      `json:"text,omitempty"`
-	OK       bool        `json:"ok,omitempty"`
-	Error    string      `json:"error,omitempty"`
-	State    *WorldState `json:"state,omitempty"`
 }
 
 var worldStatePool = sync.Pool{

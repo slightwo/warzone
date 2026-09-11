@@ -1,6 +1,6 @@
 // Package gateway owns protobuf mappings at the Gateway transport boundary.
 // Domain packages stay protobuf-free; this package is the only place that maps
-// protocol read models to Gateway V1/V2 wire messages.
+// protocol read models to Gateway V2 wire messages.
 package gateway
 
 import (
@@ -160,17 +160,4 @@ func FromWorldState(state *pb.WorldState) *protocol.WorldState {
 		result.Nodes = append(result.Nodes, FromNodeView(node))
 	}
 	return result
-}
-
-// ToLegacyMessage and FromLegacyMessage exist only for the Gateway V1
-// compatibility stream. No V2 caller should build pb.Message.
-func ToLegacyMessage(message protocol.Message) *pb.Message {
-	return &pb.Message{Type: message.Type, Action: message.Action, Username: message.Username, Password: message.Password, Dir: message.Dir, MapId: message.MapID, NodeId: message.NodeID, Confirm: message.Confirm, Item: message.Item, Text: message.Text, Ok: message.OK, Error: message.Error, State: ToWorldState(message.State)}
-}
-
-func FromLegacyMessage(message *pb.Message) protocol.Message {
-	if message == nil {
-		return protocol.Message{}
-	}
-	return protocol.Message{Type: message.GetType(), Action: message.GetAction(), Username: message.GetUsername(), Password: message.GetPassword(), Dir: message.GetDir(), MapID: message.GetMapId(), NodeID: message.GetNodeId(), Confirm: message.GetConfirm(), Item: message.GetItem(), Text: message.GetText(), OK: message.GetOk(), Error: message.GetError(), State: FromWorldState(message.GetState())}
 }

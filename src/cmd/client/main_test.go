@@ -7,14 +7,12 @@ import (
 	"google.golang.org/grpc"
 
 	"battleworld/pb"
-	"battleworld/protocol"
 )
 
 type clientTestGateway struct {
 	pb.UnimplementedGatewayServiceServer
 
 	v2Request *pb.ClientEnvelope
-	v1Request *pb.Message
 }
 
 func (s *clientTestGateway) GameStreamV2(stream pb.GatewayService_GameStreamV2Server) error {
@@ -34,24 +32,12 @@ func (s *clientTestGateway) GameStreamV2(stream pb.GatewayService_GameStreamV2Se
 	}}})
 }
 
-func (s *clientTestGateway) GameStream(stream pb.GatewayService_GameStreamServer) error {
-	request, err := stream.Recv()
-	if err != nil {
-		return err
-	}
-	s.v1Request = request
-	if request.GetType() != protocol.TypeLogin {
-		return stream.Send(&pb.Message{Type: protocol.TypeError, Error: "expected V1 login"})
-	}
-	return stream.Send(&pb.Message{Type: protocol.TypeAuth, Ok: true, State: clientTestState(1, 2, 3, 4)})
-}
-
-func TestAuthUsesSelectedAddressAndV2ByDefault(t *testing.T) {
+func TestAuthUsesSelectedAddressAndV2(t *testing.T) {
 	gateway := &clientTestGateway{}
 	address, stop := startClientTestGateway(t, gateway)
 	defer stop()
 
-	stream, state, err := auth(address, clientProtocolV2, protocol.TypeLogin, "tester", "password", "")
+	stream, state, err := auth(address, authModeLogin, "tester", "password", "")
 	if err != nil {
 		t.Fatalf("V2 auth 返回错误: %v", err)
 	}
@@ -61,24 +47,6 @@ func TestAuthUsesSelectedAddressAndV2ByDefault(t *testing.T) {
 	}
 	if state.GetSessionVersion() != 1 || state.GetMap().GetVersion() != 4 {
 		t.Fatalf("V2 认证状态 = %+v", state)
-	}
-}
-
-func TestAuthSupportsExplicitV1Fallback(t *testing.T) {
-	gateway := &clientTestGateway{}
-	address, stop := startClientTestGateway(t, gateway)
-	defer stop()
-
-	stream, state, err := auth(address, clientProtocolV1, protocol.TypeLogin, "tester", "password", "")
-	if err != nil {
-		t.Fatalf("V1 auth 返回错误: %v", err)
-	}
-	defer stream.Close()
-	if gateway.v1Request == nil || gateway.v1Request.GetUsername() != "tester" {
-		t.Fatalf("V1 认证请求 = %+v", gateway.v1Request)
-	}
-	if state.GetMapEpoch() != 3 {
-		t.Fatalf("V1 认证状态 = %+v", state)
 	}
 }
 

@@ -5,7 +5,6 @@ import (
 	"battleworld/protocol"
 	"bufio"
 	"context"
-	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -34,8 +33,8 @@ const (
 )
 
 const (
-	clientProtocolV1 = "v1"
-	clientProtocolV2 = "v2"
+	authModeLogin    = "login"
+	authModeRegister = "register"
 )
 
 var (
@@ -45,86 +44,43 @@ var (
 	shopOpen    bool
 )
 
-type gameClient interface {
-	Send(*pb.ClientEnvelope) error
-	Recv() (*pb.ServerEnvelope, error)
-	CloseSend() error
-	Close() error
-}
-
 // clientCommand constructs a fresh envelope payload for one generated request_id.
 // It avoids exposing protobuf's package-private oneof interface outside pb.
 type clientCommand func(uint64) *pb.ClientEnvelope
 
-type v2GameClient struct {
+// gameClient owns the V2 game stream and its underlying connection.
+type gameClient struct {
 	stream pb.GatewayService_GameStreamV2Client
 	conn   *grpc.ClientConn
 }
 
-func (c *v2GameClient) Send(request *pb.ClientEnvelope) error {
+func (c *gameClient) Send(request *pb.ClientEnvelope) error {
 	return c.stream.Send(request)
 }
 
-func (c *v2GameClient) Recv() (*pb.ServerEnvelope, error) {
+func (c *gameClient) Recv() (*pb.ServerEnvelope, error) {
 	return c.stream.Recv()
 }
 
-func (c *v2GameClient) CloseSend() error {
+func (c *gameClient) CloseSend() error {
 	return c.stream.CloseSend()
 }
 
-func (c *v2GameClient) Close() error {
-	_ = c.stream.CloseSend()
-	return c.conn.Close()
-}
-
-type v1GameClient struct {
-	stream pb.GatewayService_GameStreamClient
-	conn   *grpc.ClientConn
-}
-
-func (c *v1GameClient) Send(request *pb.ClientEnvelope) error {
-	message, err := v1MessageFromEnvelope(request)
-	if err != nil {
-		return err
-	}
-	return c.stream.Send(message)
-}
-
-func (c *v1GameClient) Recv() (*pb.ServerEnvelope, error) {
-	message, err := c.stream.Recv()
-	if err != nil {
-		return nil, err
-	}
-	return v1EnvelopeFromMessage(message), nil
-}
-
-func (c *v1GameClient) CloseSend() error {
-	return c.stream.CloseSend()
-}
-
-func (c *v1GameClient) Close() error {
+func (c *gameClient) Close() error {
 	_ = c.stream.CloseSend()
 	return c.conn.Close()
 }
 
 func main() {
-	protocolVersion := flag.String("protocol-version", clientProtocolV2, "Gateway 协议版本：v2（默认）或 v1（回退）")
-	flag.Parse()
-	if !isSupportedClientProtocol(*protocolVersion) {
-		fmt.Fprintf(os.Stderr, "不支持的协议版本 %q：仅支持 v1 或 v2\n", *protocolVersion)
-		os.Exit(2)
-	}
-
 	reader := bufio.NewReader(os.Stdin)
 	addr := chooseGateway(reader)
 
-	var stream gameClient
+	var stream *gameClient
 	var state *pb.WorldState
 	var err error
 	for {
 		mode, username, password, confirm := chooseAuth(reader)
-		stream, state, err = auth(addr, *protocolVersion, mode, username, password, confirm)
+		stream, state, err = auth(addr, mode, username, password, confirm)
 		if err == nil {
 			break
 		}
@@ -198,7 +154,7 @@ func main() {
 	}
 }
 
-func receiveGameUpdates(stream gameClient, done chan<- struct{}) {
+func receiveGameUpdates(stream *gameClient, done chan<- struct{}) {
 	defer close(done)
 	for {
 		envelope, err := stream.Recv()
@@ -237,7 +193,7 @@ func handleServerEnvelope(envelope *pb.ServerEnvelope) {
 	}
 }
 
-func sendPlayerCommand(stream gameClient, nextRequestID *atomic.Uint64, command clientCommand) error {
+func sendPlayerCommand(stream *gameClient, nextRequestID *atomic.Uint64, command clientCommand) error {
 	requestID := nextRequestID.Add(1)
 	return stream.Send(command(requestID))
 }
@@ -324,33 +280,18 @@ func logoutCommand() clientCommand {
 	}
 }
 
-func auth(addr, protocolVersion, mode, username, password, confirm string) (gameClient, *pb.WorldState, error) {
-	if !isSupportedClientProtocol(protocolVersion) {
-		return nil, nil, fmt.Errorf("不支持的协议版本 %q", protocolVersion)
-	}
-
+func auth(addr, mode, username, password, confirm string) (*gameClient, *pb.WorldState, error) {
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, nil, fmt.Errorf("连接网关失败：%w", err)
 	}
 
-	client := pb.NewGatewayServiceClient(conn)
-	var stream gameClient
-	if protocolVersion == clientProtocolV1 {
-		v1Stream, err := client.GameStream(context.Background())
-		if err != nil {
-			_ = conn.Close()
-			return nil, nil, fmt.Errorf("打开 V1 游戏流失败：%w", err)
-		}
-		stream = &v1GameClient{stream: v1Stream, conn: conn}
-	} else {
-		v2Stream, err := client.GameStreamV2(context.Background())
-		if err != nil {
-			_ = conn.Close()
-			return nil, nil, fmt.Errorf("打开 V2 游戏流失败：%w", err)
-		}
-		stream = &v2GameClient{stream: v2Stream, conn: conn}
+	v2Stream, err := pb.NewGatewayServiceClient(conn).GameStreamV2(context.Background())
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, fmt.Errorf("打开 V2 游戏流失败：%w", err)
 	}
+	stream := &gameClient{stream: v2Stream, conn: conn}
 
 	requestID := uint64(1)
 	if err := stream.Send(authRequest(requestID, mode, username, password, confirm)); err != nil {
@@ -378,7 +319,7 @@ func auth(addr, protocolVersion, mode, username, password, confirm string) (game
 func authRequest(requestID uint64, mode, username, password, confirm string) *pb.ClientEnvelope {
 	request := &pb.ClientEnvelope{RequestId: requestID}
 	switch mode {
-	case protocol.TypeRegister:
+	case authModeRegister:
 		request.Payload = &pb.ClientEnvelope_Register{Register: &pb.RegisterRequest{
 			Username:        username,
 			Password:        password,
@@ -391,93 +332,6 @@ func authRequest(requestID uint64, mode, username, password, confirm string) *pb
 		}}
 	}
 	return request
-}
-
-func v1MessageFromEnvelope(request *pb.ClientEnvelope) (*pb.Message, error) {
-	if request == nil {
-		return nil, fmt.Errorf("V1 请求不能为空")
-	}
-	message := &pb.Message{}
-	switch payload := request.GetPayload().(type) {
-	case *pb.ClientEnvelope_Login:
-		message.Type = protocol.TypeLogin
-		message.Username = payload.Login.GetUsername()
-		message.Password = payload.Login.GetPassword()
-	case *pb.ClientEnvelope_Register:
-		message.Type = protocol.TypeRegister
-		message.Username = payload.Register.GetUsername()
-		message.Password = payload.Register.GetPassword()
-		message.Confirm = payload.Register.GetConfirmPassword()
-	case *pb.ClientEnvelope_QuickEnter:
-		message.Type = protocol.TypeQuickEnter
-		message.Username = payload.QuickEnter.GetUsername()
-		message.Password = payload.QuickEnter.GetPassword()
-	case *pb.ClientEnvelope_Move:
-		direction, ok := v1Direction(payload.Move.GetDirection())
-		if !ok {
-			return nil, fmt.Errorf("V1 不支持的移动方向")
-		}
-		message.Type = protocol.TypeMove
-		message.Dir = direction
-	case *pb.ClientEnvelope_Attack:
-		message.Type = protocol.TypeAttack
-	case *pb.ClientEnvelope_AttackBoss:
-		message.Type = protocol.TypeBossAttack
-	case *pb.ClientEnvelope_Heal:
-		message.Type = protocol.TypeHeal
-	case *pb.ClientEnvelope_BuyItem:
-		message.Type = protocol.TypeShop
-		message.Item = payload.BuyItem.GetItem()
-	case *pb.ClientEnvelope_SwitchMap:
-		message.Type = protocol.TypeSwitchMap
-		message.MapId = payload.SwitchMap.GetMapId()
-	case *pb.ClientEnvelope_Logout:
-		message.Type = protocol.TypeLogout
-	default:
-		return nil, fmt.Errorf("V1 不支持该命令")
-	}
-	return message, nil
-}
-
-func v1EnvelopeFromMessage(message *pb.Message) *pb.ServerEnvelope {
-	if message == nil {
-		return &pb.ServerEnvelope{Payload: &pb.ServerEnvelope_Error{Error: &pb.ErrorResponse{
-			Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
-			Message: "V1 网关返回空消息",
-		}}}
-	}
-	switch message.GetType() {
-	case protocol.TypeAuth:
-		return &pb.ServerEnvelope{RequestId: 1, Payload: &pb.ServerEnvelope_Authenticated{Authenticated: &pb.Authenticated{State: message.GetState()}}}
-	case protocol.TypeState:
-		return &pb.ServerEnvelope{Payload: &pb.ServerEnvelope_State{State: message.GetState()}}
-	case protocol.TypeError:
-		return &pb.ServerEnvelope{Payload: &pb.ServerEnvelope_Error{Error: &pb.ErrorResponse{
-			Code:    pb.ErrorCode_ERROR_CODE_INTERNAL,
-			Message: message.GetError(),
-		}}}
-	default:
-		return &pb.ServerEnvelope{Payload: &pb.ServerEnvelope_Notice{Notice: &pb.ServerNotice{Message: message.GetText()}}}
-	}
-}
-
-func v1Direction(direction pb.Direction) (string, bool) {
-	switch direction {
-	case pb.Direction_DIRECTION_UP:
-		return protocol.DirUp, true
-	case pb.Direction_DIRECTION_DOWN:
-		return protocol.DirDown, true
-	case pb.Direction_DIRECTION_LEFT:
-		return protocol.DirLeft, true
-	case pb.Direction_DIRECTION_RIGHT:
-		return protocol.DirRight, true
-	default:
-		return "", false
-	}
-}
-
-func isSupportedClientProtocol(protocolVersion string) bool {
-	return protocolVersion == clientProtocolV1 || protocolVersion == clientProtocolV2
 }
 
 func formatGatewayError(requestID uint64, responseError *pb.ErrorResponse) string {
@@ -860,12 +714,12 @@ func chooseAuth(reader *bufio.Reader) (string, string, string, string) {
 		fmt.Println(renderBanner("身份验证", "1. 登录  2. 注册"))
 		fmt.Print(colorGold + "[1/2] 请选择：" + colorReset)
 		choice := readLine(reader)
-		mode := protocol.TypeLogin
+		mode := authModeLogin
 		switch choice {
 		case "1", "":
-			mode = protocol.TypeLogin
+			mode = authModeLogin
 		case "2":
-			mode = protocol.TypeRegister
+			mode = authModeRegister
 		default:
 			fmt.Println(colorRed + "无效选择，请重新输入。" + colorReset)
 			time.Sleep(700 * time.Millisecond)
@@ -877,7 +731,7 @@ func chooseAuth(reader *bufio.Reader) (string, string, string, string) {
 		fmt.Print(colorCyan + "密码：" + colorReset)
 		password := readLine(reader)
 		confirm := ""
-		if mode == protocol.TypeRegister {
+		if mode == authModeRegister {
 			fmt.Print(colorCyan + "确认密码：" + colorReset)
 			confirm = readLine(reader)
 			if password != confirm {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"expvar"
 	"flag"
 	"fmt"
 	"net"
@@ -10,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -22,23 +20,16 @@ import (
 	"battleworld/pb"
 	"battleworld/protocol"
 	"battleworld/storage"
-	gatewaywire "battleworld/transport/gateway"
 
 	_ "net/http/pprof" // 注册 /debug/pprof/ 性能分析端点。
 )
 
 const defaultGameStreamStateInterval = 100 * time.Millisecond
 
-// legacyGatewayGameStreamCalls records connections to the V1 game stream. It
-// is exposed through /debug/vars and must remain unchanged for a full release
-// window before the V1 Gateway RPC can be retired.
-var legacyGatewayGameStreamCalls = expvar.NewInt("battleworld_gateway_v1_stream_calls_total")
-
-// gatewayBackend 是 GatewayService 在 V1 游戏流中依赖的最小业务能力集合。
+// gatewayBackend 是 GatewayService 的 V2 游戏流和 AdminService 依赖的最小业务能力集合。
 // 保持传输 handler 与具体 Cluster 实现解耦，使协议行为可在不依赖 Redis 或 PostgreSQL 的
 // 情况下被表征测试覆盖。
 type gatewayBackend interface {
-	ExecuteAdmin(action, nodeID string) (string, error)
 	Register(username, password, confirm string) error
 	Login(username, password string) (*protocol.WorldState, error)
 	QuickEnter(username, password string) (*protocol.WorldState, error)
@@ -65,157 +56,6 @@ func (s *GatewayServer) gameStreamStateInterval() time.Duration {
 		return s.stateInterval
 	}
 	return defaultGameStreamStateInterval
-}
-
-func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) error {
-	legacyGatewayGameStreamCalls.Add(1)
-	reqPb, err := stream.Recv()
-	if err != nil {
-		return err
-	}
-
-	authMsg := gatewaywire.FromLegacyMessage(reqPb)
-
-	if authMsg.Type == protocol.TypeAdmin {
-		text, err := s.gameCluster.ExecuteAdmin(authMsg.Action, authMsg.NodeID)
-		if err != nil {
-			_ = stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeError, Error: err.Error()}))
-			return err
-		}
-		_ = stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeAdmin, OK: true, Text: text}))
-		return nil
-	}
-
-	var state *protocol.WorldState
-	switch authMsg.Type {
-	case protocol.TypeRegister:
-		if err := s.gameCluster.Register(authMsg.Username, authMsg.Password, authMsg.Confirm); err != nil {
-			_ = stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeError, Error: err.Error()}))
-			return err
-		}
-		state, err = s.gameCluster.Login(authMsg.Username, authMsg.Password)
-	case protocol.TypeLogin:
-		state, err = s.gameCluster.Login(authMsg.Username, authMsg.Password)
-	case protocol.TypeQuickEnter:
-		state, err = s.gameCluster.QuickEnter(authMsg.Username, authMsg.Password)
-	default:
-		_ = stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeError, Error: "首条消息必须是登录或注册请求"}))
-		return fmt.Errorf("invalid first message type: %s", authMsg.Type)
-	}
-
-	if err != nil {
-		_ = stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeError, Error: err.Error()}))
-		return err
-	}
-
-	username := authMsg.Username
-	if err := stream.Send(gatewaywire.ToLegacyMessage(protocol.Message{Type: protocol.TypeAuth, OK: true, State: state})); err != nil {
-		_ = s.gameCluster.Logout(username)
-		return err
-	}
-	protocol.FreeWorldState(state)
-
-	var once sync.Once
-	done := make(chan struct{})
-	stop := func() {
-		once.Do(func() {
-			close(done)
-			_ = s.gameCluster.Logout(username)
-		})
-	}
-	defer stop()
-	//stream不是线程安全的，使用channel控制
-	sendCh := make(chan *protocol.Message, 100)
-	go func() {
-		for {
-			select {
-			case msg := <-sendCh:
-				err := stream.Send(gatewaywire.ToLegacyMessage(*msg))
-
-				if msg.State != nil {
-					protocol.FreeWorldState(msg.State)
-				}
-
-				if err != nil {
-					stop() // 通知所有协程退出
-					return
-				}
-			case <-done:
-				// 主协程或心跳协程要求退出了，发件员也安然下班
-				return
-			}
-		}
-	}()
-
-	ticker := time.NewTicker(s.gameStreamStateInterval())
-	defer ticker.Stop()
-
-	// 心跳/状态推送协程
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				st, err := s.gameCluster.SnapshotFor(username)
-				if err != nil {
-					sendCh <- &protocol.Message{Type: protocol.TypeError, Error: err.Error()}
-					if strings.Contains(err.Error(), "当前不在线") || strings.Contains(err.Error(), "不存在") {
-						stop()
-						return
-					}
-					continue
-				}
-				sendCh <- &protocol.Message{Type: protocol.TypeState, State: st}
-			case <-done:
-				return
-			}
-		}
-	}()
-	// 接收指令循环
-	for {
-		select {
-		case <-done:
-			return nil
-		default:
-		}
-
-		reqPb, err := stream.Recv()
-		if err != nil {
-			return err
-		}
-		msg := gatewaywire.FromLegacyMessage(reqPb)
-
-		var next *protocol.WorldState
-		switch msg.Type {
-		case protocol.TypeMove:
-			next, err = s.gameCluster.Move(username, msg.Dir)
-		case protocol.TypeAttack:
-			next, err = s.gameCluster.Attack(username)
-		case protocol.TypeBossAttack:
-			next, err = s.gameCluster.AttackBoss(username)
-		case protocol.TypeHeal:
-			next, err = s.gameCluster.Heal(username)
-		case protocol.TypeShop:
-			next, err = s.gameCluster.BuyItem(username, msg.Item)
-		case protocol.TypeSwitchMap:
-			next, err = s.gameCluster.SwitchMap(username, msg.MapID)
-		case protocol.TypeLogout:
-			return nil
-		default:
-			err = fmt.Errorf("未知指令：%q", msg.Type)
-		}
-
-		if err != nil {
-			sendCh <- &protocol.Message{Type: protocol.TypeError, Error: err.Error()}
-
-			continue
-		}
-
-		if next != nil {
-			// 策略一：应用层防抖，只执行业务逻辑，不立即返回全量状态
-			// 状态的下发统一交给上面 100ms 的 ticker 批量处理，降低 syscall 发包频次
-			protocol.FreeWorldState(next)
-		}
-	}
 }
 
 func main() {

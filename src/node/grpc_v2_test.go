@@ -23,12 +23,10 @@ import (
 
 const nodeV2TestBufferSize = 1024 * 1024
 
-func TestNodeV1AndV2ServicesCoexist(t *testing.T) {
-	legacyCallsBefore := legacyNodeServiceCalls.Value()
+func TestNodeV2PingUsesTypedService(t *testing.T) {
 	service := NewNodeService("node-a", "", nil)
 	listener := bufconn.Listen(nodeV2TestBufferSize)
 	server := grpc.NewServer()
-	pb.RegisterNodeServiceServer(server, NewNodeGRPCServer(service))
 	pb.RegisterNodeServiceV2Server(server, NewNodeV2GRPCServer(service))
 	go func() { _ = server.Serve(listener) }()
 	defer server.Stop()
@@ -46,26 +44,12 @@ func TestNodeV1AndV2ServicesCoexist(t *testing.T) {
 	}
 	defer conn.Close()
 
-	legacy, err := pb.NewNodeServiceClient(conn).Ping(ctx, &pb.PingReq{})
-	if err != nil {
-		t.Fatalf("V1 Ping: %v", err)
-	}
-	if legacy.GetTs() <= 0 {
-		t.Fatalf("V1 Ping 时间戳 = %d，want positive", legacy.GetTs())
-	}
-	if got := legacyNodeServiceCalls.Value(); got != legacyCallsBefore+1 {
-		t.Fatalf("V1 Node 遥测 = %d，want %d", got, legacyCallsBefore+1)
-	}
-
-	typed, err := pb.NewNodeServiceV2Client(conn).Ping(ctx, &pb.NodePingRequest{})
+	response, err := pb.NewNodeServiceV2Client(conn).Ping(ctx, &pb.NodePingRequest{})
 	if err != nil {
 		t.Fatalf("V2 Ping: %v", err)
 	}
-	if typed.GetObservedAt() == nil || typed.GetObservedAt().CheckValid() != nil {
-		t.Fatalf("V2 Ping observed_at 无效: %v", typed.GetObservedAt())
-	}
-	if got := legacyNodeServiceCalls.Value(); got != legacyCallsBefore+1 {
-		t.Fatalf("V2 调用不应增加 V1 Node 遥测，got %d，want %d", got, legacyCallsBefore+1)
+	if response.GetObservedAt() == nil || response.GetObservedAt().CheckValid() != nil {
+		t.Fatalf("V2 Ping observed_at 无效: %v", response.GetObservedAt())
 	}
 }
 
@@ -144,50 +128,6 @@ func TestNodeV2RejectsEmptyPlayerUsername(t *testing.T) {
 	profile, err := server.Profile(context.Background(), &pb.NodeProfileRequest{MapId: "green", Username: ""})
 	if err != nil || profile.GetFound() {
 		t.Fatalf("空用户名意外写入 world: profile=%+v err=%v", profile, err)
-	}
-}
-
-func TestNodeV1ActionCheckpointAndPromoteRemainCompatible(t *testing.T) {
-	store := newNodeTestStore(t)
-	initial := nodeTestTopology("node-a", "node-b", 1, 1)
-	if err := store.CompareAndSaveTopology(0, initial); err != nil {
-		t.Fatalf("提交初始 fence: %v", err)
-	}
-	service := newAuthorizedNodeService(t, "node-a", store, initial)
-	legacy := NewNodeGRPCServer(service)
-	ctx := context.Background()
-
-	_, err := legacy.AddPlayer(ctx, &pb.AddPlayerReq{
-		MapId: "green", MapEpoch: 1,
-		Profile: &pb.UserProfile{Username: "legacy", PasswordHash: "legacy-hash", LastMap: "green", LastNode: "node-a", Hp: 91, MaxHp: 100, Alive: true},
-	})
-	if err != nil {
-		t.Fatalf("V1 AddPlayer: %v", err)
-	}
-	profile, err := legacy.Profile(ctx, &pb.ProfileReq{MapId: "green", Username: "legacy"})
-	if err != nil || !profile.GetOk() || profile.GetProfile().GetUsername() != "legacy" || profile.GetProfile().GetHp() != 91 {
-		t.Fatalf("V1 Profile = %+v, err=%v", profile, err)
-	}
-	checkpointResponse, err := legacy.Checkpoint(ctx, &pb.CheckpointReq{MapId: "green"})
-	if err != nil || checkpointResponse.GetCheckpoint() == nil || checkpointResponse.GetCheckpoint().GetCheckpoint() == "" {
-		t.Fatalf("V1 Checkpoint = %+v, err=%v", checkpointResponse, err)
-	}
-	if _, err := time.Parse(time.RFC3339, checkpointResponse.GetCheckpoint().GetCheckpoint()); err != nil {
-		t.Fatalf("V1 checkpoint 时间格式错误: %v", err)
-	}
-	if _, err := legacy.AddPlayer(ctx, &pb.AddPlayerReq{MapId: "green", MapEpoch: 0, Profile: &pb.UserProfile{Username: "old"}}); status.Code(err) != codes.FailedPrecondition {
-		t.Fatalf("V1 旧 epoch code = %s，want FailedPrecondition; err=%v", status.Code(err), err)
-	}
-
-	promoteService := newAuthorizedNodeService(t, "node-b", store, initial)
-	promote := NewNodeGRPCServer(promoteService)
-	result, err := promote.Promote(ctx, &pb.PromoteReq{MapId: "green", MapEpoch: 2, Checkpoint: checkpointResponse.GetCheckpoint()})
-	if err != nil || !result.GetOk() {
-		t.Fatalf("V1 Promote = %+v, err=%v", result, err)
-	}
-	restored, err := promote.Profile(ctx, &pb.ProfileReq{MapId: "green", Username: "legacy"})
-	if err != nil || !restored.GetOk() || restored.GetProfile().GetUsername() != "legacy" || restored.GetProfile().GetHp() != 91 {
-		t.Fatalf("V1 Promote 后 profile = %+v, err=%v", restored, err)
 	}
 }
 

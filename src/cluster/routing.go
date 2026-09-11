@@ -185,7 +185,3 @@ func (c *Cluster) GatewayStatus() protocol.GatewayStatus {
 	status.Summary = strings.Join(lines, "\n")
 	return status
 }
-
-func (c *Cluster) adminStatus() string {
-	return c.GatewayStatus().Summary
-}
