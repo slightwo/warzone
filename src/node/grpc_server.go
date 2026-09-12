@@ -15,23 +15,23 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// nodeV2GRPCServer serves the typed NodeServiceV2 endpoint.
-type nodeV2GRPCServer struct {
-	pb.UnimplementedNodeServiceV2Server
+// nodeGRPCServer serves the typed NodeService endpoint.
+type nodeGRPCServer struct {
+	pb.UnimplementedNodeServiceServer
 	svc *NodeService
 }
 
-// NewNodeV2GRPCServer returns the NodeServiceV2 endpoint backed by the local
+// NewNodeGRPCServer returns the NodeService endpoint backed by the local
 // node service. Every data-plane mutation carries MapAuthority.
-func NewNodeV2GRPCServer(svc *NodeService) pb.NodeServiceV2Server {
-	return &nodeV2GRPCServer{svc: svc}
+func NewNodeGRPCServer(svc *NodeService) pb.NodeServiceServer {
+	return &nodeGRPCServer{svc: svc}
 }
 
-func (s *nodeV2GRPCServer) Ping(context.Context, *pb.NodePingRequest) (*pb.NodePingResponse, error) {
+func (s *nodeGRPCServer) Ping(context.Context, *pb.NodePingRequest) (*pb.NodePingResponse, error) {
 	return &pb.NodePingResponse{ObservedAt: timestamppb.Now()}, nil
 }
 
-func (s *nodeV2GRPCServer) AddPlayer(ctx context.Context, req *pb.NodeAddPlayerRequest) (*pb.NodeAddPlayerResponse, error) {
+func (s *nodeGRPCServer) AddPlayer(ctx context.Context, req *pb.NodeAddPlayerRequest) (*pb.NodeAddPlayerResponse, error) {
 	authority, err := s.authority(req.GetAuthority())
 	if err != nil {
 		return nil, err
@@ -49,7 +49,7 @@ func (s *nodeV2GRPCServer) AddPlayer(ctx context.Context, req *pb.NodeAddPlayerR
 	return &pb.NodeAddPlayerResponse{}, nil
 }
 
-func (s *nodeV2GRPCServer) RemovePlayer(ctx context.Context, req *pb.NodeRemovePlayerRequest) (*pb.NodeRemovePlayerResponse, error) {
+func (s *nodeGRPCServer) RemovePlayer(ctx context.Context, req *pb.NodeRemovePlayerRequest) (*pb.NodeRemovePlayerResponse, error) {
 	authority, err := s.authority(req.GetAuthority())
 	if err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func (s *nodeV2GRPCServer) RemovePlayer(ctx context.Context, req *pb.NodeRemoveP
 	return &pb.NodeRemovePlayerResponse{Player: nodewire.ToPlayerState(profile), Removed: removed}, nil
 }
 
-func (s *nodeV2GRPCServer) MovePlayer(ctx context.Context, req *pb.NodeMovePlayerRequest) (*pb.NodePlayerActionResponse, error) {
+func (s *nodeGRPCServer) MovePlayer(ctx context.Context, req *pb.NodeMovePlayerRequest) (*pb.NodePlayerActionResponse, error) {
 	authority, err := s.authority(req.GetAuthority())
 	if err != nil {
 		return nil, err
@@ -77,7 +77,7 @@ func (s *nodeV2GRPCServer) MovePlayer(ctx context.Context, req *pb.NodeMovePlaye
 	return &pb.NodePlayerActionResponse{Message: message, Player: nodewire.ToPlayerState(profile), Accepted: accepted}, nil
 }
 
-func (s *nodeV2GRPCServer) Attack(ctx context.Context, req *pb.NodeAttackRequest) (*pb.NodeAttackResponse, error) {
+func (s *nodeGRPCServer) Attack(ctx context.Context, req *pb.NodeAttackRequest) (*pb.NodeAttackResponse, error) {
 	authority, err := s.authority(req.GetAuthority())
 	if err != nil {
 		return nil, err
@@ -89,7 +89,7 @@ func (s *nodeV2GRPCServer) Attack(ctx context.Context, req *pb.NodeAttackRequest
 	return &pb.NodeAttackResponse{Message: message, TargetMessage: targetMessage, GlobalMessage: globalMessage, Player: nodewire.ToPlayerState(profile), Accepted: accepted}, nil
 }
 
-func (s *nodeV2GRPCServer) Heal(ctx context.Context, req *pb.NodePlayerRequest) (*pb.NodePlayerActionResponse, error) {
+func (s *nodeGRPCServer) Heal(ctx context.Context, req *pb.NodePlayerRequest) (*pb.NodePlayerActionResponse, error) {
 	authority, err := s.authority(req.GetAuthority())
 	if err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ func (s *nodeV2GRPCServer) Heal(ctx context.Context, req *pb.NodePlayerRequest) 
 	return &pb.NodePlayerActionResponse{Message: message, Player: nodewire.ToPlayerState(profile), Accepted: accepted}, nil
 }
 
-func (s *nodeV2GRPCServer) BuyItem(ctx context.Context, req *pb.NodeBuyItemRequest) (*pb.NodePlayerActionResponse, error) {
+func (s *nodeGRPCServer) BuyItem(ctx context.Context, req *pb.NodeBuyItemRequest) (*pb.NodePlayerActionResponse, error) {
 	authority, err := s.authority(req.GetAuthority())
 	if err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func (s *nodeV2GRPCServer) BuyItem(ctx context.Context, req *pb.NodeBuyItemReque
 	return &pb.NodePlayerActionResponse{Message: message, Player: nodewire.ToPlayerState(profile), Accepted: accepted}, nil
 }
 
-func (s *nodeV2GRPCServer) AttackBoss(ctx context.Context, req *pb.NodePlayerRequest) (*pb.NodePlayerActionResponse, error) {
+func (s *nodeGRPCServer) AttackBoss(ctx context.Context, req *pb.NodePlayerRequest) (*pb.NodePlayerActionResponse, error) {
 	authority, err := s.authority(req.GetAuthority())
 	if err != nil {
 		return nil, err
@@ -125,7 +125,7 @@ func (s *nodeV2GRPCServer) AttackBoss(ctx context.Context, req *pb.NodePlayerReq
 	return &pb.NodePlayerActionResponse{Message: message, Player: nodewire.ToPlayerState(profile), Accepted: accepted}, nil
 }
 
-func (s *nodeV2GRPCServer) Profile(ctx context.Context, req *pb.NodeProfileRequest) (*pb.NodeProfileResponse, error) {
+func (s *nodeGRPCServer) Profile(ctx context.Context, req *pb.NodeProfileRequest) (*pb.NodeProfileResponse, error) {
 	profile, found, err := s.svc.Profile(ctx, req.GetMapId(), req.GetUsername())
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func (s *nodeV2GRPCServer) Profile(ctx context.Context, req *pb.NodeProfileReque
 	return &pb.NodeProfileResponse{Player: nodewire.ToPlayerState(profile), Found: found}, nil
 }
 
-func (s *nodeV2GRPCServer) RewardPlayer(ctx context.Context, req *pb.NodeRewardPlayerRequest) (*pb.NodeProfileResponse, error) {
+func (s *nodeGRPCServer) RewardPlayer(ctx context.Context, req *pb.NodeRewardPlayerRequest) (*pb.NodeProfileResponse, error) {
 	authority, err := s.authority(req.GetAuthority())
 	if err != nil {
 		return nil, err
@@ -145,7 +145,7 @@ func (s *nodeV2GRPCServer) RewardPlayer(ctx context.Context, req *pb.NodeRewardP
 	return &pb.NodeProfileResponse{Player: nodewire.ToPlayerState(profile), Found: found}, nil
 }
 
-func (s *nodeV2GRPCServer) Snapshot(ctx context.Context, req *pb.NodeSnapshotRequest) (*pb.NodeSnapshotResponse, error) {
+func (s *nodeGRPCServer) Snapshot(ctx context.Context, req *pb.NodeSnapshotRequest) (*pb.NodeSnapshotResponse, error) {
 	view, err := s.svc.Snapshot(ctx, req.GetMapId())
 	if err != nil {
 		return nil, err
@@ -153,7 +153,7 @@ func (s *nodeV2GRPCServer) Snapshot(ctx context.Context, req *pb.NodeSnapshotReq
 	return &pb.NodeSnapshotResponse{Map: nodewire.ToMapView(view)}, nil
 }
 
-func (s *nodeV2GRPCServer) Counts(ctx context.Context, req *pb.NodeCountsRequest) (*pb.NodeCountsResponse, error) {
+func (s *nodeGRPCServer) Counts(ctx context.Context, req *pb.NodeCountsRequest) (*pb.NodeCountsResponse, error) {
 	players, npcs, treasures, version, err := s.svc.Counts(ctx, req.GetMapId())
 	if err != nil {
 		return nil, err
@@ -161,7 +161,7 @@ func (s *nodeV2GRPCServer) Counts(ctx context.Context, req *pb.NodeCountsRequest
 	return &pb.NodeCountsResponse{Players: int32(players), Npcs: int32(npcs), Treasures: int32(treasures), Version: version}, nil
 }
 
-func (s *nodeV2GRPCServer) Checkpoint(ctx context.Context, req *pb.NodeCheckpointRequest) (*pb.NodeCheckpointResponse, error) {
+func (s *nodeGRPCServer) Checkpoint(ctx context.Context, req *pb.NodeCheckpointRequest) (*pb.NodeCheckpointResponse, error) {
 	checkpoint, err := s.svc.Checkpoint(ctx, req.GetMapId())
 	if err != nil {
 		return nil, err
@@ -169,7 +169,7 @@ func (s *nodeV2GRPCServer) Checkpoint(ctx context.Context, req *pb.NodeCheckpoin
 	return &pb.NodeCheckpointResponse{Checkpoint: nodewire.ToCheckpoint(checkpoint)}, nil
 }
 
-func (s *nodeV2GRPCServer) Promote(ctx context.Context, req *pb.NodePromoteRequest) (*pb.NodePromoteResponse, error) {
+func (s *nodeGRPCServer) Promote(ctx context.Context, req *pb.NodePromoteRequest) (*pb.NodePromoteResponse, error) {
 	authority, err := s.authority(req.GetAuthority())
 	if err != nil {
 		return nil, err
@@ -188,7 +188,7 @@ func (s *nodeV2GRPCServer) Promote(ctx context.Context, req *pb.NodePromoteReque
 	return &pb.NodePromoteResponse{}, nil
 }
 
-func (s *nodeV2GRPCServer) View(context.Context, *pb.NodeViewRequest) (*pb.NodeViewResponse, error) {
+func (s *nodeGRPCServer) View(context.Context, *pb.NodeViewRequest) (*pb.NodeViewResponse, error) {
 	return &pb.NodeViewResponse{View: nodewire.ToNodeView(s.svc.View())}, nil
 }
 
@@ -197,7 +197,7 @@ type nodeAuthority struct {
 	epoch uint64
 }
 
-func (s *nodeV2GRPCServer) authority(authority *pb.MapAuthority) (nodeAuthority, error) {
+func (s *nodeGRPCServer) authority(authority *pb.MapAuthority) (nodeAuthority, error) {
 	if authority == nil {
 		return nodeAuthority{}, invalidNodeRequest("authority 不能为空")
 	}

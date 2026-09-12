@@ -21,13 +21,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const (
-	defaultDiscoveryInterval = time.Second
-	defaultHeartbeatInterval = time.Second
-	nodeRequestTimeout       = 500 * time.Millisecond
-	leaderRetryInterval      = 250 * time.Millisecond
-)
-
 // ControlStore 是 coordinator 依赖的存储契约，*storage.Store 实现该接口。
 type ControlStore interface {
 	GetActiveNodes() ([]storage.NodeRegistryInfo, error)
@@ -72,20 +65,31 @@ type Coordinator struct {
 	started            bool
 	closed             bool
 
-	discoveryInterval time.Duration
-	heartbeatInterval time.Duration
+	discoveryInterval     time.Duration
+	heartbeatInterval     time.Duration
+	nodeRequestTimeout    time.Duration
+	leaderRetryInterval   time.Duration
+	bossReconcileInterval time.Duration
 }
 
 // New 使用 Redis token 租约构造生产 coordinator。测试替身没有 Redis 连接时回退为
 // AlwaysLeader，以保持控制面业务测试不依赖外部 Redis。
 func New(store ControlStore) (*Coordinator, error) {
-	selectedElector, err := productionElector(store)
+	return NewWithRuntimeConfig(store, config.DefaultRuntime())
+}
+
+// NewWithRuntimeConfig 使用启动时加载的运行时配置构造生产 coordinator。
+func NewWithRuntimeConfig(store ControlStore, runtime config.RuntimeConfig) (*Coordinator, error) {
+	if err := runtime.Validate(); err != nil {
+		return nil, fmt.Errorf("校验 coordinator 运行时配置: %w", err)
+	}
+	selectedElector, err := productionElector(store, runtime.LeaderElection)
 	if err != nil {
 		return nil, err
 	}
-	return newCoordinatorWithElector(store, selectedElector, func(nodeID, addr string) (cluster.CoordinatorNodeClient, error) {
+	return newCoordinatorWithRuntimeConfig(store, selectedElector, func(nodeID, addr string) (cluster.CoordinatorNodeClient, error) {
 		return cluster.NewNodeGRPCClient(nodeID, addr)
-	}, world.AvailableMaps())
+	}, world.AvailableMaps(), runtime.Coordinator)
 }
 
 // NewWithElector 允许部署或测试显式注入选主实现。
@@ -95,7 +99,7 @@ func NewWithElector(store ControlStore, selectedElector elector.Elector) (*Coord
 	}, world.AvailableMaps())
 }
 
-func productionElector(store ControlStore) (elector.Elector, error) {
+func productionElector(store ControlStore, runtime config.LeaderElectionConfig) (elector.Elector, error) {
 	provider, ok := store.(redisClientProvider)
 	if !ok || provider.RedisClient() == nil {
 		return elector.NewAlwaysLeader(), nil
@@ -108,7 +112,11 @@ func productionElector(store ControlStore) (elector.Elector, error) {
 		}
 		instanceID = fmt.Sprintf("%s-%d", hostname, os.Getpid())
 	}
-	selectedElector, err := elector.NewRedis(provider.RedisClient(), instanceID, elector.RedisOptions{})
+	selectedElector, err := elector.NewRedis(provider.RedisClient(), instanceID, elector.RedisOptions{
+		TTL:           runtime.LeaseTTL.Duration,
+		RenewInterval: runtime.RenewInterval.Duration,
+		RetryInterval: runtime.CampaignRetryInterval.Duration,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("创建 Redis coordinator elector: %w", err)
 	}
@@ -120,6 +128,10 @@ func newCoordinator(store ControlStore, newNodeClient NodeClientFactory, configs
 }
 
 func newCoordinatorWithElector(store ControlStore, selectedElector elector.Elector, newNodeClient NodeClientFactory, configs []world.MapConfig) (*Coordinator, error) {
+	return newCoordinatorWithRuntimeConfig(store, selectedElector, newNodeClient, configs, config.DefaultRuntime().Coordinator)
+}
+
+func newCoordinatorWithRuntimeConfig(store ControlStore, selectedElector elector.Elector, newNodeClient NodeClientFactory, configs []world.MapConfig, runtime config.CoordinatorConfig) (*Coordinator, error) {
 	if store == nil {
 		return nil, errors.New("coordinator store 不能为空")
 	}
@@ -135,17 +147,20 @@ func newCoordinatorWithElector(store ControlStore, selectedElector elector.Elect
 		configByID[mapConfig.ID] = mapConfig
 	}
 	return &Coordinator{
-		store:              store,
-		elector:            selectedElector,
-		configs:            configByID,
-		nodes:              make(map[string]nodeConnection),
-		connectingNodes:    make(map[string]struct{}),
-		failureGenerations: make(map[string]uint64),
-		failoverInFlight:   make(map[string]bool),
-		newNodeClient:      newNodeClient,
-		stopCh:             make(chan struct{}),
-		discoveryInterval:  defaultDiscoveryInterval,
-		heartbeatInterval:  defaultHeartbeatInterval,
+		store:                store,
+		elector:              selectedElector,
+		configs:              configByID,
+		nodes:                make(map[string]nodeConnection),
+		connectingNodes:      make(map[string]struct{}),
+		failureGenerations:   make(map[string]uint64),
+		failoverInFlight:     make(map[string]bool),
+		newNodeClient:        newNodeClient,
+		stopCh:               make(chan struct{}),
+		discoveryInterval:    runtime.DiscoveryInterval.Duration,
+		heartbeatInterval:    runtime.HealthCheckInterval.Duration,
+		nodeRequestTimeout:   runtime.NodePingTimeout.Duration,
+		leaderRetryInterval:  runtime.LeaderRetryInterval.Duration,
+		bossReconcileInterval: runtime.BossReconcileInterval.Duration,
 	}, nil
 }
 
@@ -198,7 +213,7 @@ func (c *Coordinator) leaderLoop() {
 				return
 			}
 			log.Printf("[coordinator/leader] 参与选主失败: %v", err)
-			if !waitForContext(rootCtx, leaderRetryInterval) {
+			if !waitForContext(rootCtx, c.leaderRetryInterval) {
 				return
 			}
 			continue

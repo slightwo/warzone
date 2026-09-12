@@ -88,7 +88,6 @@ type NodeView struct {
 	Addr          string   `json:"addr"`
 	Healthy       bool     `json:"healthy"`
 	PrimaryMaps   []string `json:"primary_maps"`
-	ReplicaMaps   []string `json:"replica_maps"`
 	LastHeartbeat string   `json:"last_heartbeat"`
 }
 

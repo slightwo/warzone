@@ -34,18 +34,21 @@ if (-not $NoBuild) {
 Write-Host ">>> 启动网关 (127.0.0.1:9310)..." -ForegroundColor Cyan
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot'; `$env:BW_DB_PASSWORD='$DbPassword'; go run ./cmd/server"
 
-# ---------- 3. 启动三个物理节点（各独立窗口） ----------
+# ---------- 3. 启动六个物理节点（每张地图一主一备候选，各独立窗口） ----------
 Start-Sleep -Seconds 1
 
 $nodes = @(
-    @{ id="node-a"; maps="green";        replicas="cave";        addr="127.0.0.1:9311" },
-    @{ id="node-b"; maps="cave,ruins";   replicas="";            addr="127.0.0.1:9312" },
-    @{ id="node-c"; maps="";             replicas="green,ruins"; addr="127.0.0.1:9313" }
+    @{ id="node-a"; map="green"; addr="127.0.0.1:9311" },
+    @{ id="node-b"; map="green"; addr="127.0.0.1:9312" },
+    @{ id="node-c"; map="cave";  addr="127.0.0.1:9313" },
+    @{ id="node-d"; map="cave";  addr="127.0.0.1:9314" },
+    @{ id="node-e"; map="ruins"; addr="127.0.0.1:9315" },
+    @{ id="node-f"; map="ruins"; addr="127.0.0.1:9316" }
 )
 
 foreach ($n in $nodes) {
     Write-Host ">>> 启动节点 $($n.id) ($($n.addr))..." -ForegroundColor Cyan
-    $cmd = "cd '$PSScriptRoot'; `$env:BW_DB_PASSWORD='$DbPassword'; go run ./cmd/node -id '$($n.id)' -maps '$($n.maps)' -replicas '$($n.replicas)' -addr '$($n.addr)'"
+    $cmd = "cd '$PSScriptRoot'; `$env:BW_DB_PASSWORD='$DbPassword'; go run ./cmd/node -id '$($n.id)' -map '$($n.map)' -addr '$($n.addr)'"
     Start-Process powershell -ArgumentList "-NoExit", "-Command", $cmd
     Start-Sleep -Milliseconds 500
 }
@@ -54,6 +57,6 @@ Write-Host ""
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host "全部启动完成。" -ForegroundColor Green
 Write-Host "  网关:   127.0.0.1:9310" -ForegroundColor Green
-Write-Host "  节点:   node-a 9311 / node-b 9312 / node-c 9313" -ForegroundColor Green
+Write-Host "  节点:   node-a..node-f (9311..9316；每张地图两个候选)" -ForegroundColor Green
 Write-Host "  数据库: $env:BW_DB_PASSWORD 已注入 (host 172.31.50.252)" -ForegroundColor Green
 Write-Host "==============================================" -ForegroundColor Green

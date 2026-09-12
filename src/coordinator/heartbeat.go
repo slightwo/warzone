@@ -32,7 +32,7 @@ func (c *Coordinator) heartbeatOnce() {
 	c.mu.RUnlock()
 
 	for _, connection := range nodes {
-		ctx, cancel := context.WithTimeout(context.Background(), nodeRequestTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), c.nodeRequestTimeout)
 		err := connection.client.Ping(ctx)
 		cancel()
 		c.setNodeHealth(connection.client.NodeID(), err == nil)
@@ -57,7 +57,7 @@ func (c *Coordinator) setNodeHealth(nodeID string, healthy bool) {
 		log.Printf("[coordinator/heartbeat] 节点 %s 已恢复健康", nodeID)
 		return
 	}
-	log.Printf("[coordinator/heartbeat] 节点 %s 不健康，开始评估带 MapEpoch 的副本提升", nodeID)
+	log.Printf("[coordinator/heartbeat] 节点 %s 不健康，开始评估带 MapEpoch 的同图 standby 提升", nodeID)
 	// 绝不能持有 c.mu 调用 Promote 或 Redis CAS；这些操作可回调/阻塞，且 failoverMap
 	// 会重新读取最新 topology，确保只切换仍由该失效节点拥有的地图。
 	go c.failoverNode(nodeID)

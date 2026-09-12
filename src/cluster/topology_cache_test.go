@@ -4,13 +4,14 @@ import (
 	"testing"
 	"time"
 
+	"battleworld/config"
 	"battleworld/storage"
 	"battleworld/world"
 )
 
 func TestApplyTopologyLockedOnlyAdvancesVersion(t *testing.T) {
 	cluster := newTopologyCacheTestCluster()
-	first := testTopology(1, "node-a", "node-b")
+	first := testTopology(1, "node-a")
 	applied, err := cluster.applyTopologyLocked(first)
 	if err != nil || !applied {
 		t.Fatalf("apply first topology = applied=%t err=%v", applied, err)
@@ -19,7 +20,7 @@ func TestApplyTopologyLockedOnlyAdvancesVersion(t *testing.T) {
 		t.Fatalf("owner = %q, want node-a", got)
 	}
 
-	stale := testTopology(1, "node-c", "node-b")
+	stale := testTopology(1, "node-c")
 	applied, err = cluster.applyTopologyLocked(stale)
 	if err != nil || applied {
 		t.Fatalf("apply same version = applied=%t err=%v, want false nil", applied, err)
@@ -28,7 +29,7 @@ func TestApplyTopologyLockedOnlyAdvancesVersion(t *testing.T) {
 		t.Fatalf("stale topology replaced owner with %q", got)
 	}
 
-	next := testTopology(2, "node-c", "node-b")
+	next := testTopology(2, "node-c")
 	applied, err = cluster.applyTopologyLocked(next)
 	if err != nil || !applied {
 		t.Fatalf("apply next topology = applied=%t err=%v", applied, err)
@@ -53,17 +54,16 @@ func testMapConfigs(mapIDs ...string) map[string]world.MapConfig {
 
 func newTopologyCacheTestCluster() *Cluster {
 	return &Cluster{
-		configs:  testMapConfigs("green"),
-		owners:   make(map[string]string),
-		replicas: make(map[string]string),
+		configs: testMapConfigs("green"),
+		owners:  make(map[string]string),
+		runtime: config.DefaultRuntime().Gateway,
 	}
 }
 
-func testTopology(version uint64, owner, replica string) storage.Topology {
+func testTopology(version uint64, owner string) storage.Topology {
 	return storage.Topology{
 		Version:   version,
 		Owners:    map[string]string{"green": owner},
-		Replicas:  map[string]string{"green": replica},
 		MapEpochs: map[string]uint64{"green": 1},
 		UpdatedAt: time.Now().UTC(),
 	}

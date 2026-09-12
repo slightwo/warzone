@@ -8,9 +8,11 @@ import (
 	"time"
 )
 
-// BuildInitialTopology 根据节点声明的候选能力构造首个拓扑快照。ready=false 表示
-// 候选节点尚未齐全；重复候选、未知地图或同节点主备等配置错误会返回 error，不能通过
-// 任意选择最后一个节点来掩盖配置问题。
+const minimumMapCandidates = 2
+
+// BuildInitialTopology 根据节点声明的单一地图候选构造首个拓扑快照。每张地图必须有至少
+// 两个健康候选节点：按节点 ID 稳定选出 owner，其余节点作为 standby。ready=false 表示
+// 候选节点尚未齐全；非法或重复注册会返回 error。
 func BuildInitialTopology(knownMapIDs map[string]struct{}, nodes []NodeRegistryInfo, now time.Time) (topology Topology, ready bool, err error) {
 	mapIDs := make([]string, 0, len(knownMapIDs))
 	for mapID := range knownMapIDs {
@@ -23,8 +25,7 @@ func BuildInitialTopology(knownMapIDs map[string]struct{}, nodes []NodeRegistryI
 
 	nodes = append([]NodeRegistryInfo(nil), nodes...)
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
-	owners := make(map[string]string, len(mapIDs))
-	replicas := make(map[string]string, len(mapIDs))
+	candidates := make(map[string][]string, len(mapIDs))
 	seenNodes := make(map[string]struct{}, len(nodes))
 	for _, node := range nodes {
 		if strings.TrimSpace(node.ID) == "" || node.ID != strings.TrimSpace(node.ID) {
@@ -38,24 +39,27 @@ func BuildInitialTopology(knownMapIDs map[string]struct{}, nodes []NodeRegistryI
 		}
 		seenNodes[node.ID] = struct{}{}
 
-		if err := addTopologyCandidates(owners, node.ID, node.Maps, knownMapIDs, "主"); err != nil {
-			return Topology{}, false, err
+		mapID := node.MapID
+		if strings.TrimSpace(mapID) == "" || mapID != strings.TrimSpace(mapID) {
+			return Topology{}, false, fmt.Errorf("节点 %q 声明了非法地图 ID %q", node.ID, mapID)
 		}
-		if err := addTopologyCandidates(replicas, node.ID, node.Replicas, knownMapIDs, "副本"); err != nil {
-			return Topology{}, false, err
+		if _, known := knownMapIDs[mapID]; !known {
+			return Topology{}, false, fmt.Errorf("节点 %q 声明了未知地图 %q", node.ID, mapID)
 		}
+		candidates[mapID] = append(candidates[mapID], node.ID)
 	}
 
+	owners := make(map[string]string, len(mapIDs))
 	mapEpochs := make(map[string]uint64, len(mapIDs))
 	for _, mapID := range mapIDs {
-		ownerID, hasOwner := owners[mapID]
-		replicaID, hasReplica := replicas[mapID]
-		if !hasOwner || !hasReplica {
+		declared := candidates[mapID]
+		if len(declared) < minimumMapCandidates {
 			return Topology{}, false, nil
 		}
-		if ownerID == replicaID {
-			return Topology{}, false, fmt.Errorf("地图 %q 的主节点和副本节点均为 %q", mapID, ownerID)
-		}
+		// nodes 已按 ID 排序，因此每个 map 的候选顺序也是稳定的；仍显式排序以维持
+		// 该函数在调用方更改遍历方式后的确定性。
+		sort.Strings(declared)
+		owners[mapID] = declared[0]
 		mapEpochs[mapID] = 1
 	}
 
@@ -63,7 +67,6 @@ func BuildInitialTopology(knownMapIDs map[string]struct{}, nodes []NodeRegistryI
 		Version:    1,
 		LeaderTerm: 0,
 		Owners:     owners,
-		Replicas:   replicas,
 		MapEpochs:  mapEpochs,
 		UpdatedAt:  now.UTC(),
 	}
@@ -71,25 +74,4 @@ func BuildInitialTopology(knownMapIDs map[string]struct{}, nodes []NodeRegistryI
 		return Topology{}, false, err
 	}
 	return topology, true, nil
-}
-
-func addTopologyCandidates(target map[string]string, nodeID string, declaredMapIDs []string, knownMapIDs map[string]struct{}, role string) error {
-	seenMaps := make(map[string]struct{}, len(declaredMapIDs))
-	for _, mapID := range declaredMapIDs {
-		if strings.TrimSpace(mapID) == "" || mapID != strings.TrimSpace(mapID) {
-			return fmt.Errorf("节点 %q 声明了非法%s地图 ID %q", nodeID, role, mapID)
-		}
-		if _, known := knownMapIDs[mapID]; !known {
-			return fmt.Errorf("节点 %q 声明了未知%s地图 %q", nodeID, role, mapID)
-		}
-		if _, duplicate := seenMaps[mapID]; duplicate {
-			return fmt.Errorf("节点 %q 重复声明%s地图 %q", nodeID, role, mapID)
-		}
-		seenMaps[mapID] = struct{}{}
-		if existingNodeID, exists := target[mapID]; exists {
-			return fmt.Errorf("地图 %q 的%s候选节点冲突: %q 与 %q", mapID, role, existingNodeID, nodeID)
-		}
-		target[mapID] = nodeID
-	}
-	return nil
 }

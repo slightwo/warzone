@@ -13,58 +13,58 @@ import (
 	"battleworld/protocol"
 )
 
-func TestGameStreamV2RejectsNonAuthenticationFirstMessage(t *testing.T) {
-	stream, closeClient := newGatewayV2TestStream(t, &fakeGatewayBackend{})
+func TestGameStreamRejectsNonAuthenticationFirstMessage(t *testing.T) {
+	stream, closeClient := newGatewayTestStream(t, &fakeGatewayBackend{})
 	defer closeClient()
 
-	if err := stream.Send(v2MoveRequest(11, pb.Direction_DIRECTION_UP)); err != nil {
+	if err := stream.Send(moveRequest(11, pb.Direction_DIRECTION_UP)); err != nil {
 		t.Fatalf("发送首条命令: %v", err)
 	}
-	response := receiveV2Envelope(t, stream)
-	assertV2Error(t, response, 11, pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, false)
+	response := receiveEnvelope(t, stream)
+	assertError(t, response, 11, pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, false)
 	if _, err := stream.Recv(); err == nil {
-		t.Fatal("首条非认证消息被拒后 V2 stream 应结束")
+		t.Fatal("首条非认证消息被拒后 stream 应结束")
 	}
 }
 
-func TestGameStreamV2AuthenticationFailureUsesStableErrorCode(t *testing.T) {
+func TestGameStreamAuthenticationFailureUsesStableErrorCode(t *testing.T) {
 	backend := &fakeGatewayBackend{loginErr: errors.New("用户名或密码错误")}
-	stream, closeClient := newGatewayV2TestStream(t, backend)
+	stream, closeClient := newGatewayTestStream(t, backend)
 	defer closeClient()
 
-	if err := stream.Send(v2LoginRequest(12)); err != nil {
+	if err := stream.Send(loginRequest(12)); err != nil {
 		t.Fatalf("发送登录请求: %v", err)
 	}
-	response := receiveV2Envelope(t, stream)
-	assertV2Error(t, response, 12, pb.ErrorCode_ERROR_CODE_AUTH_FAILED, false)
+	response := receiveEnvelope(t, stream)
+	assertError(t, response, 12, pb.ErrorCode_ERROR_CODE_AUTH_FAILED, false)
 	if _, err := stream.Recv(); err == nil {
-		t.Fatal("认证失败后 V2 stream 应结束")
+		t.Fatal("认证失败后 stream 应结束")
 	}
 }
 
-func TestGameStreamV2AuthenticatesCommandsAndPushesState(t *testing.T) {
+func TestGameStreamAuthenticatesCommandsAndPushesState(t *testing.T) {
 	backend := &fakeGatewayBackend{}
-	stream, closeClient := newGatewayV2TestStream(t, backend)
+	stream, closeClient := newGatewayTestStream(t, backend)
 	defer closeClient()
 
-	loginV2(t, stream, 21)
-	if err := stream.Send(v2MoveRequest(22, pb.Direction_DIRECTION_UP)); err != nil {
+	login(t, stream, 21)
+	if err := stream.Send(moveRequest(22, pb.Direction_DIRECTION_UP)); err != nil {
 		t.Fatalf("发送移动命令: %v", err)
 	}
-	result := receiveV2Matching(t, stream, func(response *pb.ServerEnvelope) bool {
+	result := receiveMatching(t, stream, func(response *pb.ServerEnvelope) bool {
 		return response.GetCommandResult() != nil && response.GetRequestId() == 22
 	})
 	if result.GetCommandResult().GetMessage() != "移动指令已接受" {
 		t.Fatalf("移动确认文本 = %q", result.GetCommandResult().GetMessage())
 	}
 
-	state := receiveV2Matching(t, stream, func(response *pb.ServerEnvelope) bool {
+	state := receiveMatching(t, stream, func(response *pb.ServerEnvelope) bool {
 		return response.GetState() != nil
 	})
 	if state.GetRequestId() != 0 {
 		t.Fatalf("主动状态 request_id = %d, want 0", state.GetRequestId())
 	}
-	assertV2TestState(t, state.GetState())
+	assertTestState(t, state.GetState())
 
 	if err := stream.Send(&pb.ClientEnvelope{
 		RequestId: 23,
@@ -72,7 +72,7 @@ func TestGameStreamV2AuthenticatesCommandsAndPushesState(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("发送退出命令: %v", err)
 	}
-	logoutResult := receiveV2Matching(t, stream, func(response *pb.ServerEnvelope) bool {
+	logoutResult := receiveMatching(t, stream, func(response *pb.ServerEnvelope) bool {
 		return response.GetCommandResult() != nil && response.GetRequestId() == 23
 	})
 	if logoutResult.GetCommandResult().GetMessage() != "已退出游戏" {
@@ -84,64 +84,64 @@ func TestGameStreamV2AuthenticatesCommandsAndPushesState(t *testing.T) {
 	})
 }
 
-func TestGameStreamV2CommandErrorKeepsStreamOpen(t *testing.T) {
+func TestGameStreamCommandErrorKeepsStreamOpen(t *testing.T) {
 	backend := &fakeGatewayBackend{moveErr: errors.New("移动请求被拒绝")}
-	stream, closeClient := newGatewayV2TestStream(t, backend)
+	stream, closeClient := newGatewayTestStream(t, backend)
 	defer closeClient()
 
-	loginV2(t, stream, 31)
-	if err := stream.Send(v2MoveRequest(32, pb.Direction_DIRECTION_UP)); err != nil {
+	login(t, stream, 31)
+	if err := stream.Send(moveRequest(32, pb.Direction_DIRECTION_UP)); err != nil {
 		t.Fatalf("发送被拒绝移动: %v", err)
 	}
-	response := receiveV2Matching(t, stream, func(response *pb.ServerEnvelope) bool {
+	response := receiveMatching(t, stream, func(response *pb.ServerEnvelope) bool {
 		return response.GetError() != nil && response.GetRequestId() == 32
 	})
-	assertV2Error(t, response, 32, pb.ErrorCode_ERROR_CODE_COMMAND_REJECTED, false)
+	assertError(t, response, 32, pb.ErrorCode_ERROR_CODE_COMMAND_REJECTED, false)
 
-	if err := stream.Send(v2MoveRequest(33, pb.Direction_DIRECTION_DOWN)); err != nil {
+	if err := stream.Send(moveRequest(33, pb.Direction_DIRECTION_DOWN)); err != nil {
 		t.Fatalf("命令错误后继续发送: %v", err)
 	}
-	second := receiveV2Matching(t, stream, func(response *pb.ServerEnvelope) bool {
+	second := receiveMatching(t, stream, func(response *pb.ServerEnvelope) bool {
 		return response.GetError() != nil && response.GetRequestId() == 33
 	})
-	assertV2Error(t, second, 33, pb.ErrorCode_ERROR_CODE_COMMAND_REJECTED, false)
+	assertError(t, second, 33, pb.ErrorCode_ERROR_CODE_COMMAND_REJECTED, false)
 }
 
-func TestGameStreamV2RejectsInvalidCommandRequestIDAndDirection(t *testing.T) {
-	stream, closeClient := newGatewayV2TestStream(t, &fakeGatewayBackend{})
+func TestGameStreamRejectsInvalidCommandRequestIDAndDirection(t *testing.T) {
+	stream, closeClient := newGatewayTestStream(t, &fakeGatewayBackend{})
 	defer closeClient()
 
-	loginV2(t, stream, 41)
-	if err := stream.Send(v2MoveRequest(0, pb.Direction_DIRECTION_UP)); err != nil {
+	login(t, stream, 41)
+	if err := stream.Send(moveRequest(0, pb.Direction_DIRECTION_UP)); err != nil {
 		t.Fatalf("发送零 request_id 命令: %v", err)
 	}
-	zeroID := receiveV2Matching(t, stream, func(response *pb.ServerEnvelope) bool {
+	zeroID := receiveMatching(t, stream, func(response *pb.ServerEnvelope) bool {
 		return response.GetError() != nil && response.GetRequestId() == 0
 	})
-	assertV2Error(t, zeroID, 0, pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, false)
+	assertError(t, zeroID, 0, pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, false)
 
-	if err := stream.Send(v2MoveRequest(42, pb.Direction_DIRECTION_UNSPECIFIED)); err != nil {
+	if err := stream.Send(moveRequest(42, pb.Direction_DIRECTION_UNSPECIFIED)); err != nil {
 		t.Fatalf("发送无效方向命令: %v", err)
 	}
-	invalidDirection := receiveV2Matching(t, stream, func(response *pb.ServerEnvelope) bool {
+	invalidDirection := receiveMatching(t, stream, func(response *pb.ServerEnvelope) bool {
 		return response.GetError() != nil && response.GetRequestId() == 42
 	})
-	assertV2Error(t, invalidDirection, 42, pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, false)
+	assertError(t, invalidDirection, 42, pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, false)
 }
 
-func TestGameStreamV2MapsStaleRouteErrors(t *testing.T) {
+func TestGameStreamMapsStaleRouteErrors(t *testing.T) {
 	backend := &fakeGatewayBackend{moveErr: status.Error(codes.FailedPrecondition, "map authority denied")}
-	stream, closeClient := newGatewayV2TestStream(t, backend)
+	stream, closeClient := newGatewayTestStream(t, backend)
 	defer closeClient()
 
-	loginV2(t, stream, 51)
-	if err := stream.Send(v2MoveRequest(52, pb.Direction_DIRECTION_UP)); err != nil {
+	login(t, stream, 51)
+	if err := stream.Send(moveRequest(52, pb.Direction_DIRECTION_UP)); err != nil {
 		t.Fatalf("发送过期路由命令: %v", err)
 	}
-	response := receiveV2Matching(t, stream, func(response *pb.ServerEnvelope) bool {
+	response := receiveMatching(t, stream, func(response *pb.ServerEnvelope) bool {
 		return response.GetError() != nil && response.GetRequestId() == 52
 	})
-	assertV2Error(t, response, 52, pb.ErrorCode_ERROR_CODE_STALE_ROUTE, true)
+	assertError(t, response, 52, pb.ErrorCode_ERROR_CODE_STALE_ROUTE, true)
 }
 
 func TestGetGatewayStatusUsesDedicatedAdminService(t *testing.T) {
@@ -161,12 +161,12 @@ func TestGetGatewayStatusUsesDedicatedAdminService(t *testing.T) {
 	}
 }
 
-func TestV2SenderCoalescesStateAndRejectsRegression(t *testing.T) {
-	stream := &recordingV2Stream{}
-	sender := newV2Sender(stream)
-	sender.SubmitState(v2TestWorldState(4, 4, 4))
-	sender.SubmitState(v2TestWorldState(6, 6, 6))
-	sender.SubmitState(v2TestWorldState(5, 5, 5))
+func TestSenderCoalescesStateAndRejectsRegression(t *testing.T) {
+	stream := &recordingStream{}
+	sender := newStreamSender(stream)
+	sender.SubmitState(buildWorldState(4, 4, 4))
+	sender.SubmitState(buildWorldState(6, 6, 6))
+	sender.SubmitState(buildWorldState(5, 5, 5))
 	sender.Start()
 	defer func() {
 		sender.Abort()
@@ -183,38 +183,38 @@ func TestV2SenderCoalescesStateAndRejectsRegression(t *testing.T) {
 	}
 }
 
-func TestV2StateOrdering(t *testing.T) {
-	previous := v2StateVersion{mapID: "green", sessionVersion: 5, mapEpoch: 7, mapVersion: 100}
+func TestStateOrdering(t *testing.T) {
+	previous := stateVersion{mapID: "green", sessionVersion: 5, mapEpoch: 7, mapVersion: 100}
 	for _, test := range []struct {
 		name      string
-		next      v2StateVersion
+		next      stateVersion
 		regresses bool
 	}{
-		{name: "newer map version", next: v2StateVersion{mapID: "green", sessionVersion: 5, mapEpoch: 7, mapVersion: 101}},
-		{name: "new epoch permits map version reset", next: v2StateVersion{mapID: "green", sessionVersion: 5, mapEpoch: 8, mapVersion: 1}},
-		{name: "new session permits epoch reset", next: v2StateVersion{mapID: "green", sessionVersion: 6, mapEpoch: 1, mapVersion: 1}},
-		{name: "older session", next: v2StateVersion{mapID: "green", sessionVersion: 4, mapEpoch: 9, mapVersion: 101}, regresses: true},
-		{name: "older epoch", next: v2StateVersion{mapID: "green", sessionVersion: 5, mapEpoch: 6, mapVersion: 101}, regresses: true},
-		{name: "older map version", next: v2StateVersion{mapID: "green", sessionVersion: 5, mapEpoch: 7, mapVersion: 99}, regresses: true},
+		{name: "newer map version", next: stateVersion{mapID: "green", sessionVersion: 5, mapEpoch: 7, mapVersion: 101}},
+		{name: "new epoch permits map version reset", next: stateVersion{mapID: "green", sessionVersion: 5, mapEpoch: 8, mapVersion: 1}},
+		{name: "new session permits epoch reset", next: stateVersion{mapID: "green", sessionVersion: 6, mapEpoch: 1, mapVersion: 1}},
+		{name: "older session", next: stateVersion{mapID: "green", sessionVersion: 4, mapEpoch: 9, mapVersion: 101}, regresses: true},
+		{name: "older epoch", next: stateVersion{mapID: "green", sessionVersion: 5, mapEpoch: 6, mapVersion: 101}, regresses: true},
+		{name: "older map version", next: stateVersion{mapID: "green", sessionVersion: 5, mapEpoch: 7, mapVersion: 99}, regresses: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := v2StateRegresses(test.next, previous); got != test.regresses {
-				t.Fatalf("v2StateRegresses(%+v, %+v) = %t, want %t", test.next, previous, got, test.regresses)
+			if got := stateRegresses(test.next, previous); got != test.regresses {
+				t.Fatalf("stateRegresses(%+v, %+v) = %t, want %t", test.next, previous, got, test.regresses)
 			}
 		})
 	}
 }
 
-func TestV2SenderDrainsControlMessagesOnFinish(t *testing.T) {
-	stream := &recordingV2Stream{}
-	sender := newV2Sender(stream)
+func TestSenderDrainsControlMessagesOnFinish(t *testing.T) {
+	stream := &recordingStream{}
+	sender := newStreamSender(stream)
 	if !sender.EnqueueControl(&pb.ServerEnvelope{RequestId: 61, Payload: &pb.ServerEnvelope_CommandResult{CommandResult: &pb.CommandResult{Message: "first"}}}) {
 		t.Fatal("入队 first 控制消息失败")
 	}
 	if !sender.EnqueueControl(&pb.ServerEnvelope{RequestId: 62, Payload: &pb.ServerEnvelope_Error{Error: &pb.ErrorResponse{Code: pb.ErrorCode_ERROR_CODE_COMMAND_REJECTED}}}) {
 		t.Fatal("入队 second 控制消息失败")
 	}
-	sender.SubmitState(v2TestWorldState(9, 9, 9))
+	sender.SubmitState(buildWorldState(9, 9, 9))
 	sender.Start()
 	sender.Finish()
 	sender.Wait()
@@ -230,16 +230,16 @@ func TestV2SenderDrainsControlMessagesOnFinish(t *testing.T) {
 	}
 }
 
-func TestV2SenderAppliesBackpressureInsteadOfDroppingControlMessages(t *testing.T) {
-	stream := newBlockingV2Stream()
-	sender := newV2Sender(stream)
+func TestSenderAppliesBackpressureInsteadOfDroppingControlMessages(t *testing.T) {
+	stream := newBlockingStream()
+	sender := newStreamSender(stream)
 	sender.Start()
 
 	if !sender.EnqueueControl(&pb.ServerEnvelope{RequestId: 1, Payload: &pb.ServerEnvelope_CommandResult{CommandResult: &pb.CommandResult{}}}) {
 		t.Fatal("入队首个控制消息失败")
 	}
 	<-stream.started
-	for requestID := 2; requestID <= v2ControlQueueCapacity+1; requestID++ {
+	for requestID := 2; requestID <= controlQueueCapacity+1; requestID++ {
 		if !sender.EnqueueControl(&pb.ServerEnvelope{RequestId: uint64(requestID), Payload: &pb.ServerEnvelope_CommandResult{CommandResult: &pb.CommandResult{}}}) {
 			t.Fatalf("控制队列在填满前拒绝 request_id=%d", requestID)
 		}
@@ -263,7 +263,7 @@ func TestV2SenderAppliesBackpressureInsteadOfDroppingControlMessages(t *testing.
 	sender.Wait()
 }
 
-func v2LoginRequest(requestID uint64) *pb.ClientEnvelope {
+func loginRequest(requestID uint64) *pb.ClientEnvelope {
 	return &pb.ClientEnvelope{
 		RequestId: requestID,
 		Payload: &pb.ClientEnvelope_Login{Login: &pb.LoginRequest{
@@ -273,64 +273,64 @@ func v2LoginRequest(requestID uint64) *pb.ClientEnvelope {
 	}
 }
 
-func v2MoveRequest(requestID uint64, direction pb.Direction) *pb.ClientEnvelope {
+func moveRequest(requestID uint64, direction pb.Direction) *pb.ClientEnvelope {
 	return &pb.ClientEnvelope{
 		RequestId: requestID,
 		Payload:   &pb.ClientEnvelope_Move{Move: &pb.MoveCommand{Direction: direction}},
 	}
 }
 
-func loginV2(t *testing.T, stream pb.GatewayService_GameStreamV2Client, requestID uint64) {
+func login(t *testing.T, stream pb.GatewayService_GameStreamClient, requestID uint64) {
 	t.Helper()
-	if err := stream.Send(v2LoginRequest(requestID)); err != nil {
-		t.Fatalf("发送 V2 登录请求: %v", err)
+	if err := stream.Send(loginRequest(requestID)); err != nil {
+		t.Fatalf("发送登录请求: %v", err)
 	}
-	response := receiveV2Matching(t, stream, func(response *pb.ServerEnvelope) bool {
+	response := receiveMatching(t, stream, func(response *pb.ServerEnvelope) bool {
 		return response.GetAuthenticated() != nil && response.GetRequestId() == requestID
 	})
 	if response.GetAuthenticated().GetState() == nil {
-		t.Fatal("V2 认证成功响应缺少 WorldState")
+		t.Fatal("认证成功响应缺少 WorldState")
 	}
-	assertV2TestState(t, response.GetAuthenticated().GetState())
+	assertTestState(t, response.GetAuthenticated().GetState())
 }
 
-func receiveV2Envelope(t *testing.T, stream pb.GatewayService_GameStreamV2Client) *pb.ServerEnvelope {
+func receiveEnvelope(t *testing.T, stream pb.GatewayService_GameStreamClient) *pb.ServerEnvelope {
 	t.Helper()
 	response, err := stream.Recv()
 	if err != nil {
-		t.Fatalf("接收 V2 游戏流消息: %v", err)
+		t.Fatalf("接收游戏流消息: %v", err)
 	}
 	return response
 }
 
-func receiveV2Matching(t *testing.T, stream pb.GatewayService_GameStreamV2Client, predicate func(*pb.ServerEnvelope) bool) *pb.ServerEnvelope {
+func receiveMatching(t *testing.T, stream pb.GatewayService_GameStreamClient, predicate func(*pb.ServerEnvelope) bool) *pb.ServerEnvelope {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		response := receiveV2Envelope(t, stream)
+		response := receiveEnvelope(t, stream)
 		if predicate(response) {
 			return response
 		}
 	}
-	t.Fatal("在超时前未收到匹配的 V2 消息")
+	t.Fatal("在超时前未收到匹配的消息")
 	return nil
 }
 
-func assertV2Error(t *testing.T, response *pb.ServerEnvelope, requestID uint64, code pb.ErrorCode, retryable bool) {
+func assertError(t *testing.T, response *pb.ServerEnvelope, requestID uint64, code pb.ErrorCode, retryable bool) {
 	t.Helper()
 	if response.GetRequestId() != requestID || response.GetError() == nil || response.GetError().GetCode() != code || response.GetError().GetRetryable() != retryable {
-		t.Fatalf("V2 错误响应 = %+v, want request_id=%d code=%s retryable=%t", response, requestID, code, retryable)
+		t.Fatalf("错误响应 = %+v, want request_id=%d code=%s retryable=%t", response, requestID, code, retryable)
 	}
 }
 
-func assertV2TestState(t *testing.T, state *pb.WorldState) {
+func assertTestState(t *testing.T, state *pb.WorldState) {
 	t.Helper()
 	if state.GetSessionVersion() != 1 || state.GetTopologyVersion() != 2 || state.GetMapEpoch() != 3 || state.GetMap().GetId() != "green" {
-		t.Fatalf("V2 状态字段 = %+v", state)
+		t.Fatalf("状态字段 = %+v", state)
 	}
 }
 
-func v2TestWorldState(sessionVersion int64, topologyVersion, mapEpoch uint64) *protocol.WorldState {
+func buildWorldState(sessionVersion int64, topologyVersion, mapEpoch uint64) *protocol.WorldState {
 	state := testWorldState()
 	state.SessionVersion = sessionVersion
 	state.TopologyVersion = topologyVersion
@@ -338,45 +338,45 @@ func v2TestWorldState(sessionVersion int64, topologyVersion, mapEpoch uint64) *p
 	return state
 }
 
-type recordingV2Stream struct {
-	pb.GatewayService_GameStreamV2Server
+type recordingStream struct {
+	pb.GatewayService_GameStreamServer
 	mu   sync.Mutex
 	sent []*pb.ServerEnvelope
 }
 
-func (s *recordingV2Stream) Send(envelope *pb.ServerEnvelope) error {
+func (s *recordingStream) Send(envelope *pb.ServerEnvelope) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sent = append(s.sent, envelope)
 	return nil
 }
 
-func (s *recordingV2Stream) count() int {
+func (s *recordingStream) count() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.sent)
 }
 
-func (s *recordingV2Stream) envelopes() []*pb.ServerEnvelope {
+func (s *recordingStream) envelopes() []*pb.ServerEnvelope {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]*pb.ServerEnvelope(nil), s.sent...)
 }
 
-type blockingV2Stream struct {
-	pb.GatewayService_GameStreamV2Server
+type blockingStream struct {
+	pb.GatewayService_GameStreamServer
 	started chan struct{}
 	release chan struct{}
 }
 
-func newBlockingV2Stream() *blockingV2Stream {
-	return &blockingV2Stream{
+func newBlockingStream() *blockingStream {
+	return &blockingStream{
 		started: make(chan struct{}, 1),
 		release: make(chan struct{}),
 	}
 }
 
-func (s *blockingV2Stream) Send(*pb.ServerEnvelope) error {
+func (s *blockingStream) Send(*pb.ServerEnvelope) error {
 	select {
 	case s.started <- struct{}{}:
 	default:

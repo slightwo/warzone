@@ -60,7 +60,6 @@ message NodeView {
     string addr = 2;
     bool healthy = 3;
     repeated string primary_maps = 4;
-    repeated string replica_maps = 5;
     string last_heartbeat = 6;
 }
 
@@ -109,11 +108,11 @@ uint64 map_epoch = 9;
 
 // GatewayService exposes the typed bidirectional game stream.
 service GatewayService {
-    rpc GameStreamV2(stream ClientEnvelope) returns (stream ServerEnvelope);
+    rpc GameStream(stream ClientEnvelope) returns (stream ServerEnvelope);
 }
 
 // Direction is deliberately closed at the Gateway boundary. UNSPECIFIED and unknown
-// numeric values are invalid client input and must be rejected by the V2 handler.
+// numeric values are invalid client input and must be rejected by the stream handler.
 enum Direction {
     DIRECTION_UNSPECIFIED = 0;
     DIRECTION_UP = 1;
@@ -137,7 +136,7 @@ enum ErrorCode {
 // ClientEnvelope carries exactly one authentication request or player command.
 // request_id must be non-zero and unique among a live client's outstanding requests.
 // An empty payload, an unknown enum value, or a command before authentication is an
-// INVALID_REQUEST in the V2 handler.
+// INVALID_REQUEST in the stream handler.
 message ClientEnvelope {
     uint64 request_id = 1;
 
@@ -156,7 +155,7 @@ message ClientEnvelope {
     }
 }
 
-// LoginRequest is the initial credential exchange for an existing player. V2 terminal
+// LoginRequest is the initial credential exchange for an existing player. Terminal
 // APIs intentionally never expose a password_hash field.
 message LoginRequest {
     string username = 1;
@@ -196,7 +195,7 @@ message SwitchMapCommand {
 
 message LogoutCommand {}
 
-// ServerEnvelope is written by a single V2 stream writer. Authentication outcomes,
+// ServerEnvelope is written by a single stream writer. Authentication outcomes,
 // command outcomes, errors, and notices are reliable control messages. State updates
 // are mergeable: an implementation may replace queued state with the latest snapshot.
 message ServerEnvelope {
@@ -250,10 +249,10 @@ message GatewayStatusResponse {
     string summary = 4;
 }
 
-// NodeServiceV2 is the typed Node RPC contract used by Gateway and Coordinator.
+// NodeService is the typed Node RPC contract used by Gateway and Coordinator.
 // Every map mutation carries MapAuthority so the node can fence stale owners before
 // world state changes; no Node data-plane payload includes an account password hash.
-service NodeServiceV2 {
+service NodeService {
     rpc Ping(NodePingRequest) returns (NodePingResponse);
     rpc AddPlayer(NodeAddPlayerRequest) returns (NodeAddPlayerResponse);
     rpc RemovePlayer(NodeRemovePlayerRequest) returns (NodeRemovePlayerResponse);
@@ -271,7 +270,7 @@ service NodeServiceV2 {
     rpc View(NodeViewRequest) returns (NodeViewResponse);
 }
 
-// MapAuthority is the immutable topology proof attached to every V2 map write.
+// MapAuthority is the immutable topology proof attached to every map write.
 // owner_node_id allows nodes to reject malformed calls before their local/Redis
 // authority checks; map_epoch is the fencing token enforced at the write point.
 message MapAuthority {

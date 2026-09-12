@@ -114,8 +114,9 @@ func gatewayOwnerTargets(topology storage.Topology, registrations []storage.Node
 	return targets
 }
 
-// gatewayNodeViewsLocked 生成网关本地的连接视图。Healthy 表示网关已为该 owner 建立
-// 数据面客户端，不代表对节点执行过健康探测；真实健康状态由 coordinator 负责。
+// gatewayNodeViewsLocked 生成网关本地的 owner 连接视图。Healthy 表示网关已为 owner
+// 建立数据面客户端，不代表对节点执行过健康探测；真实健康状态由 coordinator 负责。
+// standby 由 coordinator 基于注册表在故障转移时动态选择，不属于网关数据面连接池。
 // 调用方必须持有 c.mu 读锁或写锁。
 func (c *Cluster) gatewayNodeViewsLocked() []protocol.NodeView {
 	viewsByID := make(map[string]protocol.NodeView)
@@ -131,19 +132,6 @@ func (c *Cluster) gatewayNodeViewsLocked() []protocol.NodeView {
 		view.PrimaryMaps = append(view.PrimaryMaps, mapID)
 		viewsByID[nodeID] = view
 	}
-	for mapID, nodeID := range c.topology.Replicas {
-		if nodeID == "" {
-			continue
-		}
-		view := viewsByID[nodeID]
-		view.ID = nodeID
-		view.Addr = c.nodeAddrs[nodeID]
-		_, view.Healthy = c.nodes[nodeID]
-		view.LastHeartbeat = "由 coordinator 管理"
-		view.ReplicaMaps = append(view.ReplicaMaps, mapID)
-		viewsByID[nodeID] = view
-	}
-
 	nodeIDs := make([]string, 0, len(viewsByID))
 	for nodeID := range viewsByID {
 		nodeIDs = append(nodeIDs, nodeID)
@@ -153,7 +141,6 @@ func (c *Cluster) gatewayNodeViewsLocked() []protocol.NodeView {
 	for _, nodeID := range nodeIDs {
 		view := viewsByID[nodeID]
 		sort.Strings(view.PrimaryMaps)
-		sort.Strings(view.ReplicaMaps)
 		views = append(views, view)
 	}
 	return views
@@ -180,7 +167,7 @@ func (c *Cluster) GatewayStatus() protocol.GatewayStatus {
 		if view.Healthy {
 			nodeStatus = "数据面已连接"
 		}
-		lines = append(lines, fmt.Sprintf("- %s %s 主分片=%v 副本=%v", view.ID, nodeStatus, view.PrimaryMaps, view.ReplicaMaps))
+		lines = append(lines, fmt.Sprintf("- %s %s owner 地图=%v", view.ID, nodeStatus, view.PrimaryMaps))
 	}
 	status.Summary = strings.Join(lines, "\n")
 	return status

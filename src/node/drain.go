@@ -43,7 +43,7 @@ func (n *NodeService) BeginDrain(ctx context.Context) error {
 	}
 	n.drainMu.Unlock()
 
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(n.runtime.DrainPollInterval.Duration)
 	defer ticker.Stop()
 	for {
 		ownedMapIDs, fresh := n.authority.OwnedMapIDs()

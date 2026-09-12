@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"battleworld/config"
 	"battleworld/storage"
 
 	"google.golang.org/grpc/codes"
@@ -33,7 +34,6 @@ func TestAuthorityCacheRejectsStaleEpochAndFailsClosedAfterGrace(t *testing.T) {
 	topology := storage.Topology{
 		Version:   3,
 		Owners:    map[string]string{"green": "node-a"},
-		Replicas:  map[string]string{"green": "node-b"},
 		MapEpochs: map[string]uint64{"green": 2},
 		UpdatedAt: now,
 	}
@@ -60,11 +60,10 @@ func TestEnsureOwnedMapsCreatesRuntimeForTopologyOwnerAfterRestart(t *testing.T)
 	topology := storage.Topology{
 		Version:   4,
 		Owners:    map[string]string{"green": "node-c"},
-		Replicas:  map[string]string{"green": "node-a"},
 		MapEpochs: map[string]uint64{"green": 3},
 		UpdatedAt: now,
 	}
-	service := NewNodeService("node-c", "", nil)
+	service := NewNodeService("node-c", "", nil, config.DefaultRuntime().Node, "")
 	service.authority.now = func() time.Time { return now }
 	if err := service.authority.refresh(fakeTopologyLoader{topology: &topology, found: true}); err != nil {
 		t.Fatalf("刷新拓扑: %v", err)
@@ -89,24 +88,50 @@ func TestGRPCAuthorityErrorsUseFailedPrecondition(t *testing.T) {
 	}
 }
 
-func TestAuthorityCacheOnlyAllowsCurrentReplicaPromotion(t *testing.T) {
+func TestAuthorityCacheAllowsNonOwnerCandidatePromotion(t *testing.T) {
 	now := time.Date(2026, time.September, 7, 0, 0, 0, 0, time.UTC)
 	topology := storage.Topology{
 		Version:   3,
 		Owners:    map[string]string{"green": "node-a"},
-		Replicas:  map[string]string{"green": "node-b"},
 		MapEpochs: map[string]uint64{"green": 2},
 		UpdatedAt: now,
 	}
-	cache := newAuthorityCache("node-b", time.Second)
-	cache.now = func() time.Time { return now }
-	if err := cache.refresh(fakeTopologyLoader{topology: &topology, found: true}); err != nil {
+	standby := newAuthorityCache("node-b", time.Second)
+	standby.now = func() time.Time { return now }
+	if err := standby.refresh(fakeTopologyLoader{topology: &topology, found: true}); err != nil {
 		t.Fatalf("刷新拓扑: %v", err)
 	}
-	if err := cache.RequirePromotionCandidate("green", 3); err != nil {
-		t.Fatalf("当前副本提升被拒绝: %v", err)
+	if err := standby.RequirePromotionCandidate("green", 3); err != nil {
+		t.Fatalf("同图非 owner 候选提升被拒绝: %v", err)
 	}
-	if err := cache.RequirePromotionCandidate("green", 2); !errors.Is(err, ErrMapPromotionDenied) {
+	if err := standby.RequirePromotionCandidate("green", 2); !errors.Is(err, ErrMapPromotionDenied) {
 		t.Fatalf("错误目标 epoch = %v，want ErrMapPromotionDenied", err)
+	}
+
+	owner := newAuthorityCache("node-a", time.Second)
+	owner.now = func() time.Time { return now }
+	if err := owner.refresh(fakeTopologyLoader{topology: &topology, found: true}); err != nil {
+		t.Fatalf("刷新 owner 拓扑: %v", err)
+	}
+	if err := owner.RequirePromotionCandidate("green", 3); !errors.Is(err, ErrMapPromotionDenied) {
+		t.Fatalf("当前 owner 不应自我提升: %v", err)
+	}
+}
+
+func TestNodeServiceRejectsPromotionForAnotherDeclaredMap(t *testing.T) {
+	now := time.Date(2026, time.September, 7, 0, 0, 0, 0, time.UTC)
+	topology := storage.Topology{
+		Version:   3,
+		Owners:    map[string]string{"green": "node-a"},
+		MapEpochs: map[string]uint64{"green": 2},
+		UpdatedAt: now,
+	}
+	service := NewNodeService("node-b", "", nil, config.DefaultRuntime().Node, "cave")
+	service.authority.now = func() time.Time { return now }
+	if err := service.authority.refresh(fakeTopologyLoader{topology: &topology, found: true}); err != nil {
+		t.Fatalf("刷新拓扑: %v", err)
+	}
+	if err := service.RequirePromotionCandidate("green", 3); !errors.Is(err, ErrMapPromotionDenied) {
+		t.Fatalf("节点声明 cave 仍可提升 green: %v", err)
 	}
 }

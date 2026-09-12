@@ -1,0 +1,45 @@
+# 运行时节奏配置。所有进程启动时自动读取本文件；修改后需重启相关进程生效。
+# 时长使用 Go 格式，例如 150ms、2s、1m。
+version: 1
+
+leader_election:
+  # Coordinator leader 租约；renew_interval 必须小于 lease_ttl。
+  lease_ttl: 3s
+  renew_interval: 1s
+  campaign_retry_interval: 200ms
+
+node_registry:
+  # 节点注册续约；heartbeat_interval 必须小于 lease_ttl。
+  heartbeat_interval: 3s
+  lease_ttl: 5s
+
+coordinator:
+  # 节点发现、存活确认与控制面重试节奏。
+  discovery_interval: 1s
+  health_check_interval: 1s
+  node_ping_timeout: 500ms
+  leader_retry_interval: 250ms
+  boss_reconcile_interval: 1s
+
+node:
+  # 拓扑刷新失败后，宽限期内可暂用最后成功快照；grace 至少为刷新周期的两倍。
+  topology_refresh_interval: 500ms
+  topology_authority_grace: 2s
+  # 世界 tick 同时驱动当前 checkpoint 保存频率；调大将扩大故障恢复的数据窗口。
+  world_tick_interval: 700ms
+  hot_session_flush_interval: 10s
+  drain_poll_interval: 100ms
+  drain_timeout: 30s
+
+gateway:
+  # 路由兜底刷新、只读地图缓存、游戏流推送及 Node RPC 的时序。
+  topology_refresh_interval: 500ms
+  map_snapshot_refresh_interval: 150ms
+  stream_state_interval: 100ms
+  node_rpc_timeout: 500ms
+
+http:
+  lifecycle_read_header_timeout: 5s
+  # pprof 仅绑定本机地址；生产环境可关闭。
+  pprof_enabled: true
+  pprof_addr: localhost:6060

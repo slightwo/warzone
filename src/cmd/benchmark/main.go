@@ -20,7 +20,7 @@ import (
 	_ "net/http/pprof"
 )
 
-const benchmarkProtocol = "v2"
+const benchmarkProtocol = "gateway"
 
 var (
 	users       int
@@ -104,7 +104,7 @@ var dirs = []pb.Direction{
 func main() {
 	flag.Parse()
 
-	log.Printf("Starting V2 benchmark with %d users for %d seconds against %s\n", users, duration, gatewayAddr)
+	log.Printf("Starting benchmark with %d users for %d seconds against %s\n", users, duration, gatewayAddr)
 
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(duration)*time.Second)
@@ -122,10 +122,10 @@ func main() {
 
 func runUser(ctx context.Context, wg *sync.WaitGroup, id int) {
 	defer wg.Done()
-	runV2User(ctx, id)
+	runGatewayUser(ctx, id)
 }
 
-func runV2User(ctx context.Context, id int) {
+func runGatewayUser(ctx context.Context, id int) {
 	conn, err := grpc.NewClient(gatewayAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		metrics.transportErrors.Add(1)
@@ -133,14 +133,14 @@ func runV2User(ctx context.Context, id int) {
 	}
 	defer conn.Close()
 
-	stream, err := pb.NewGatewayServiceClient(conn).GameStreamV2(ctx)
+	stream, err := pb.NewGatewayServiceClient(conn).GameStream(ctx)
 	if err != nil {
-		log.Printf("[V2 user %d] open stream: %v", id, err)
+		log.Printf("[user %d] open stream: %v", id, err)
 		metrics.transportErrors.Add(1)
 		return
 	}
 
-	username := fmt.Sprintf("bench_v2_user_%d_%d", id, time.Now().UnixNano())
+	username := fmt.Sprintf("bench_user_%d_%d", id, time.Now().UnixNano())
 	const authRequestID = 1
 	if err := stream.Send(&pb.ClientEnvelope{
 		RequestId: authRequestID,

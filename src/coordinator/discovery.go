@@ -38,7 +38,7 @@ func (c *Coordinator) discoverOnce() {
 	}
 }
 
-// discoverNodes 仅建立控制面连接池，不依据节点注册声明直接修改地图主从归属。
+// discoverNodes 仅建立控制面连接池，不依据节点注册声明直接修改地图 owner。
 func (c *Coordinator) discoverNodes(activeNodes []storage.NodeRegistryInfo) {
 	c.mu.Lock()
 	pending := make([]storage.NodeRegistryInfo, 0, len(activeNodes))
@@ -74,7 +74,7 @@ func (c *Coordinator) connectDiscoveredNode(info storage.NodeRegistryInfo) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), nodeRequestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), c.nodeRequestTimeout)
 	err = client.Ping(ctx)
 	cancel()
 	if err != nil {

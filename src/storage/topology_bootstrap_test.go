@@ -6,16 +6,19 @@ import (
 	"time"
 )
 
-func TestBuildInitialTopology(t *testing.T) {
+func TestBuildInitialTopologyElectsDeterministicOwnersFromSameMapCandidates(t *testing.T) {
 	knownMapIDs := map[string]struct{}{
 		"green": {},
 		"cave":  {},
 		"ruins": {},
 	}
 	nodes := []NodeRegistryInfo{
-		{ID: "node-c", Addr: "127.0.0.1:9313", Replicas: []string{"green", "ruins"}},
-		{ID: "node-a", Addr: "127.0.0.1:9311", Maps: []string{"green"}, Replicas: []string{"cave"}},
-		{ID: "node-b", Addr: "127.0.0.1:9312", Maps: []string{"cave", "ruins"}},
+		{ID: "node-f", Addr: "127.0.0.1:9316", MapID: "ruins"},
+		{ID: "node-d", Addr: "127.0.0.1:9314", MapID: "cave"},
+		{ID: "node-b", Addr: "127.0.0.1:9312", MapID: "green"},
+		{ID: "node-a", Addr: "127.0.0.1:9311", MapID: "green"},
+		{ID: "node-e", Addr: "127.0.0.1:9315", MapID: "ruins"},
+		{ID: "node-c", Addr: "127.0.0.1:9313", MapID: "cave"},
 	}
 
 	topology, ready, err := BuildInitialTopology(knownMapIDs, nodes, time.Date(2026, time.September, 7, 1, 2, 3, 0, time.FixedZone("UTC+8", 8*60*60)))
@@ -28,16 +31,10 @@ func TestBuildInitialTopology(t *testing.T) {
 	if topology.Version != 1 || topology.LeaderTerm != 0 {
 		t.Fatalf("初始版本或任期不符合预期: %+v", topology)
 	}
-	if got, want := topology.Owners["green"], "node-a"; got != want {
-		t.Fatalf("green owner = %q，want %q", got, want)
-	}
-	if got, want := topology.Owners["cave"], "node-b"; got != want {
-		t.Fatalf("cave owner = %q，want %q", got, want)
-	}
-	if got, want := topology.Replicas["cave"], "node-a"; got != want {
-		t.Fatalf("cave replica = %q，want %q", got, want)
-	}
-	for _, mapID := range []string{"green", "cave", "ruins"} {
+	for mapID, wantOwner := range map[string]string{"green": "node-a", "cave": "node-c", "ruins": "node-e"} {
+		if got := topology.Owners[mapID]; got != wantOwner {
+			t.Fatalf("%s owner = %q，want %q", mapID, got, wantOwner)
+		}
 		if got := topology.MapEpochs[mapID]; got != 1 {
 			t.Fatalf("%s epoch = %d，want 1", mapID, got)
 		}
@@ -47,40 +44,38 @@ func TestBuildInitialTopology(t *testing.T) {
 	}
 }
 
-func TestBuildInitialTopologyWaitsForCompleteCandidates(t *testing.T) {
+func TestBuildInitialTopologyWaitsForTwoCandidatesPerMap(t *testing.T) {
 	topology, ready, err := BuildInitialTopology(map[string]struct{}{"green": {}, "cave": {}}, []NodeRegistryInfo{
-		{ID: "node-a", Addr: "127.0.0.1:9311", Maps: []string{"green"}},
-		{ID: "node-b", Addr: "127.0.0.1:9312", Replicas: []string{"green"}},
+		{ID: "node-a", Addr: "127.0.0.1:9311", MapID: "green"},
+		{ID: "node-b", Addr: "127.0.0.1:9312", MapID: "green"},
+		{ID: "node-c", Addr: "127.0.0.1:9313", MapID: "cave"},
 	}, time.Now())
 	if err != nil {
 		t.Fatalf("候选集不完整应继续等待，而非报错: %v", err)
 	}
 	if ready {
-		t.Fatalf("不完整候选集生成了拓扑: %+v", topology)
+		t.Fatalf("单候选地图仍生成了拓扑: %+v", topology)
 	}
 }
 
-func TestBuildInitialTopologyRejectsCandidateConflicts(t *testing.T) {
-	_, ready, err := BuildInitialTopology(map[string]struct{}{"green": {}}, []NodeRegistryInfo{
-		{ID: "node-a", Addr: "127.0.0.1:9311", Maps: []string{"green"}},
-		{ID: "node-b", Addr: "127.0.0.1:9312", Maps: []string{"green"}, Replicas: []string{"green"}},
-	}, time.Now())
-	if ready {
-		t.Fatal("冲突候选被判定为已就绪")
-	}
-	if err == nil || !strings.Contains(err.Error(), "冲突") {
-		t.Fatalf("冲突候选错误 = %v，want 包含冲突", err)
-	}
-}
-
-func TestBuildInitialTopologyRejectsPrimaryReplicaOnSameNode(t *testing.T) {
-	_, ready, err := BuildInitialTopology(map[string]struct{}{"green": {}}, []NodeRegistryInfo{
-		{ID: "node-a", Addr: "127.0.0.1:9311", Maps: []string{"green"}, Replicas: []string{"green"}},
-	}, time.Now())
-	if ready {
-		t.Fatal("主副本同节点被判定为已就绪")
-	}
-	if err == nil || !strings.Contains(err.Error(), "均为") {
-		t.Fatalf("主副本同节点错误 = %v", err)
+func TestBuildInitialTopologyRejectsInvalidSingleMapRegistration(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		nodes []NodeRegistryInfo
+		want  string
+	}{
+		{name: "empty map", nodes: []NodeRegistryInfo{{ID: "node-a", Addr: "127.0.0.1:9311"}}, want: "非法地图"},
+		{name: "unknown map", nodes: []NodeRegistryInfo{{ID: "node-a", Addr: "127.0.0.1:9311", MapID: "lava"}}, want: "未知地图"},
+		{name: "duplicate node", nodes: []NodeRegistryInfo{{ID: "node-a", Addr: "127.0.0.1:9311", MapID: "green"}, {ID: "node-a", Addr: "127.0.0.1:9312", MapID: "green"}}, want: "重复注册"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, ready, err := BuildInitialTopology(map[string]struct{}{"green": {}}, test.nodes, time.Now())
+			if ready {
+				t.Fatal("非法节点注册被判定为已就绪")
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("注册错误 = %v，want 包含 %q", err, test.want)
+			}
+		})
 	}
 }

@@ -13,12 +13,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// NodeGRPCClient is the typed NodeServiceV2 client shared by the Gateway data
+// NodeGRPCClient is the typed NodeService client shared by the Gateway data
 // plane and Coordinator control plane.
 type NodeGRPCClient struct {
-	v2   pb.NodeServiceV2Client
-	conn *grpc.ClientConn
-	id   string
+	client pb.NodeServiceClient
+	conn   *grpc.ClientConn
+	id     string
 }
 
 func NewNodeGRPCClient(id string, addr string) (*NodeGRPCClient, error) {
@@ -27,9 +27,9 @@ func NewNodeGRPCClient(id string, addr string) (*NodeGRPCClient, error) {
 		return nil, err
 	}
 	return &NodeGRPCClient{
-		v2:   pb.NewNodeServiceV2Client(conn),
-		conn: conn,
-		id:   id,
+		client: pb.NewNodeServiceClient(conn),
+		conn:   conn,
+		id:     id,
 	}, nil
 }
 
@@ -45,7 +45,7 @@ func (c *NodeGRPCClient) AddPlayer(ctx context.Context, mapID string, epoch uint
 	if profile == nil {
 		return fmt.Errorf("player profile 不能为空")
 	}
-	_, err := c.v2.AddPlayer(ctx, &pb.NodeAddPlayerRequest{
+	_, err := c.client.AddPlayer(ctx, &pb.NodeAddPlayerRequest{
 		Authority: nodewire.NewMapAuthority(mapID, c.id, epoch),
 		Player:    nodewire.ToPlayerState(*profile),
 	})
@@ -53,7 +53,7 @@ func (c *NodeGRPCClient) AddPlayer(ctx context.Context, mapID string, epoch uint
 }
 
 func (c *NodeGRPCClient) RemovePlayer(ctx context.Context, mapID, username string, epoch uint64) (protocol.UserProfile, bool, error) {
-	response, err := c.v2.RemovePlayer(ctx, &pb.NodeRemovePlayerRequest{
+	response, err := c.client.RemovePlayer(ctx, &pb.NodeRemovePlayerRequest{
 		Authority: nodewire.NewMapAuthority(mapID, c.id, epoch),
 		Username:  username,
 	})
@@ -68,7 +68,7 @@ func (c *NodeGRPCClient) MovePlayer(ctx context.Context, mapID, username, direct
 	if err != nil {
 		return "", protocol.UserProfile{}, false, err
 	}
-	response, err := c.v2.MovePlayer(ctx, &pb.NodeMovePlayerRequest{
+	response, err := c.client.MovePlayer(ctx, &pb.NodeMovePlayerRequest{
 		Authority: nodewire.NewMapAuthority(mapID, c.id, epoch),
 		Username:  username,
 		Direction: wireDirection,
@@ -80,7 +80,7 @@ func (c *NodeGRPCClient) MovePlayer(ctx context.Context, mapID, username, direct
 }
 
 func (c *NodeGRPCClient) Attack(ctx context.Context, mapID, username string, epoch uint64) (string, string, string, protocol.UserProfile, bool, error) {
-	response, err := c.v2.Attack(ctx, &pb.NodeAttackRequest{
+	response, err := c.client.Attack(ctx, &pb.NodeAttackRequest{
 		Authority: nodewire.NewMapAuthority(mapID, c.id, epoch),
 		Username:  username,
 	})
@@ -91,7 +91,7 @@ func (c *NodeGRPCClient) Attack(ctx context.Context, mapID, username string, epo
 }
 
 func (c *NodeGRPCClient) Heal(ctx context.Context, mapID, username string, epoch uint64) (string, protocol.UserProfile, bool, error) {
-	response, err := c.v2.Heal(ctx, &pb.NodePlayerRequest{
+	response, err := c.client.Heal(ctx, &pb.NodePlayerRequest{
 		Authority: nodewire.NewMapAuthority(mapID, c.id, epoch),
 		Username:  username,
 	})
@@ -102,7 +102,7 @@ func (c *NodeGRPCClient) Heal(ctx context.Context, mapID, username string, epoch
 }
 
 func (c *NodeGRPCClient) BuyItem(ctx context.Context, mapID, username, item string, epoch uint64) (string, protocol.UserProfile, bool, error) {
-	response, err := c.v2.BuyItem(ctx, &pb.NodeBuyItemRequest{
+	response, err := c.client.BuyItem(ctx, &pb.NodeBuyItemRequest{
 		Authority: nodewire.NewMapAuthority(mapID, c.id, epoch),
 		Username:  username,
 		Item:      item,
@@ -114,7 +114,7 @@ func (c *NodeGRPCClient) BuyItem(ctx context.Context, mapID, username, item stri
 }
 
 func (c *NodeGRPCClient) AttackBoss(ctx context.Context, mapID, username string, epoch uint64) (string, protocol.UserProfile, bool, error) {
-	response, err := c.v2.AttackBoss(ctx, &pb.NodePlayerRequest{
+	response, err := c.client.AttackBoss(ctx, &pb.NodePlayerRequest{
 		Authority: nodewire.NewMapAuthority(mapID, c.id, epoch),
 		Username:  username,
 	})
@@ -125,7 +125,7 @@ func (c *NodeGRPCClient) AttackBoss(ctx context.Context, mapID, username string,
 }
 
 func (c *NodeGRPCClient) Profile(ctx context.Context, mapID, username string) (protocol.UserProfile, bool, error) {
-	response, err := c.v2.Profile(ctx, &pb.NodeProfileRequest{MapId: mapID, Username: username})
+	response, err := c.client.Profile(ctx, &pb.NodeProfileRequest{MapId: mapID, Username: username})
 	if err != nil {
 		return protocol.UserProfile{}, false, err
 	}
@@ -133,7 +133,7 @@ func (c *NodeGRPCClient) Profile(ctx context.Context, mapID, username string) (p
 }
 
 func (c *NodeGRPCClient) RewardPlayer(ctx context.Context, mapID, username string, treasureDelta, victoryDelta int, epoch uint64) (protocol.UserProfile, bool, error) {
-	response, err := c.v2.RewardPlayer(ctx, &pb.NodeRewardPlayerRequest{
+	response, err := c.client.RewardPlayer(ctx, &pb.NodeRewardPlayerRequest{
 		Authority:     nodewire.NewMapAuthority(mapID, c.id, epoch),
 		Username:      username,
 		TreasureDelta: int32(treasureDelta),
@@ -146,7 +146,7 @@ func (c *NodeGRPCClient) RewardPlayer(ctx context.Context, mapID, username strin
 }
 
 func (c *NodeGRPCClient) Snapshot(ctx context.Context, mapID string) (protocol.MapView, error) {
-	response, err := c.v2.Snapshot(ctx, &pb.NodeSnapshotRequest{MapId: mapID})
+	response, err := c.client.Snapshot(ctx, &pb.NodeSnapshotRequest{MapId: mapID})
 	if err != nil {
 		return protocol.MapView{}, err
 	}
@@ -154,7 +154,7 @@ func (c *NodeGRPCClient) Snapshot(ctx context.Context, mapID string) (protocol.M
 }
 
 func (c *NodeGRPCClient) Counts(ctx context.Context, mapID string) (int, int, int, int64, error) {
-	response, err := c.v2.Counts(ctx, &pb.NodeCountsRequest{MapId: mapID})
+	response, err := c.client.Counts(ctx, &pb.NodeCountsRequest{MapId: mapID})
 	if err != nil {
 		return 0, 0, 0, 0, err
 	}
@@ -162,12 +162,12 @@ func (c *NodeGRPCClient) Counts(ctx context.Context, mapID string) (int, int, in
 }
 
 func (c *NodeGRPCClient) Ping(ctx context.Context) error {
-	_, err := c.v2.Ping(ctx, &pb.NodePingRequest{})
+	_, err := c.client.Ping(ctx, &pb.NodePingRequest{})
 	return err
 }
 
 func (c *NodeGRPCClient) Checkpoint(ctx context.Context, mapID string) (protocol.MapCheckpoint, error) {
-	response, err := c.v2.Checkpoint(ctx, &pb.NodeCheckpointRequest{MapId: mapID})
+	response, err := c.client.Checkpoint(ctx, &pb.NodeCheckpointRequest{MapId: mapID})
 	if err != nil {
 		return protocol.MapCheckpoint{}, err
 	}
@@ -175,7 +175,7 @@ func (c *NodeGRPCClient) Checkpoint(ctx context.Context, mapID string) (protocol
 }
 
 func (c *NodeGRPCClient) Promote(mapID string, _ world.MapConfig, checkpoint protocol.MapCheckpoint, epoch uint64) error {
-	_, err := c.v2.Promote(context.Background(), &pb.NodePromoteRequest{
+	_, err := c.client.Promote(context.Background(), &pb.NodePromoteRequest{
 		Authority:  nodewire.NewMapAuthority(mapID, c.id, epoch),
 		Checkpoint: nodewire.ToCheckpoint(checkpoint),
 	})
@@ -183,7 +183,7 @@ func (c *NodeGRPCClient) Promote(mapID string, _ world.MapConfig, checkpoint pro
 }
 
 func (c *NodeGRPCClient) View() protocol.NodeView {
-	response, err := c.v2.View(context.Background(), &pb.NodeViewRequest{})
+	response, err := c.client.View(context.Background(), &pb.NodeViewRequest{})
 	if err != nil || response.GetView() == nil {
 		return protocol.NodeView{ID: c.id}
 	}

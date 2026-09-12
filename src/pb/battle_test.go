@@ -72,19 +72,37 @@ func TestServerEnvelopePayloadRoundTrip(t *testing.T) {
 	}
 }
 
-func TestV2ContractShapeAndStableErrorCodes(t *testing.T) {
+func TestContractShapeAndStableErrorCodes(t *testing.T) {
 	file := File_pb_battle_proto
+	expectedServices := map[protoreflect.Name]struct{}{
+		"GatewayService": {},
+		"AdminService":   {},
+		"NodeService":    {},
+	}
+	if file.Services().Len() != len(expectedServices) {
+		t.Fatalf("service 数量 = %d，期望 %d", file.Services().Len(), len(expectedServices))
+	}
+	for index := 0; index < file.Services().Len(); index++ {
+		service := file.Services().Get(index)
+		if _, ok := expectedServices[service.Name()]; !ok {
+			t.Fatalf("不支持的 service %q", service.FullName())
+		}
+	}
+
 	gateway := findService(t, file, "GatewayService")
-	v2 := findMethod(t, gateway, "GameStreamV2")
-	assertStreamingMethod(t, v2, true, true, "ClientEnvelope", "ServerEnvelope")
+	if gateway.Methods().Len() != 1 {
+		t.Fatalf("GatewayService 方法数量 = %d，期望 1", gateway.Methods().Len())
+	}
+	gameStream := findMethod(t, gateway, "GameStream")
+	assertStreamingMethod(t, gameStream, true, true, "ClientEnvelope", "ServerEnvelope")
 
 	admin := findService(t, file, "AdminService")
 	status := findMethod(t, admin, "GetGatewayStatus")
 	assertStreamingMethod(t, status, false, false, "GatewayStatusRequest", "GatewayStatusResponse")
 
-	nodeV2 := findService(t, file, "NodeServiceV2")
-	assertStreamingMethod(t, findMethod(t, nodeV2, "AddPlayer"), false, false, "NodeAddPlayerRequest", "NodeAddPlayerResponse")
-	assertStreamingMethod(t, findMethod(t, nodeV2, "Promote"), false, false, "NodePromoteRequest", "NodePromoteResponse")
+	node := findService(t, file, "NodeService")
+	assertStreamingMethod(t, findMethod(t, node, "AddPlayer"), false, false, "NodeAddPlayerRequest", "NodeAddPlayerResponse")
+	assertStreamingMethod(t, findMethod(t, node, "Promote"), false, false, "NodePromoteRequest", "NodePromoteResponse")
 
 	authority := findMessage(t, file, "MapAuthority")
 	for name, number := range map[protoreflect.Name]protoreflect.FieldNumber{
@@ -153,20 +171,8 @@ func TestV2ContractShapeAndStableErrorCodes(t *testing.T) {
 	}
 }
 
-func TestRetiredV1ContractIsAbsent(t *testing.T) {
-	file := File_pb_battle_proto
-	if file.Messages().ByName("Message") != nil {
-		t.Fatal("V1 Message 不应保留在 protobuf 契约中")
-	}
-	if file.Services().ByName("NodeService") != nil {
-		t.Fatal("V1 NodeService 不应保留在 protobuf 契约中")
-	}
-	gateway := findService(t, file, "GatewayService")
-	if gateway.Methods().ByName("GameStream") != nil {
-		t.Fatal("V1 GatewayService.GameStream 不应保留在 protobuf 契约中")
-	}
-
-	worldState := findMessage(t, file, "WorldState")
+func TestWorldStateFieldNumbers(t *testing.T) {
+	worldState := findMessage(t, File_pb_battle_proto, "WorldState")
 	for name, number := range map[protoreflect.Name]protoreflect.FieldNumber{
 		"self": 1, "map": 2, "maps": 3, "nodes": 4, "boss": 5,
 		"events": 6, "session_version": 7, "topology_version": 8, "map_epoch": 9,

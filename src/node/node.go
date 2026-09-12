@@ -10,47 +10,44 @@ import (
 	"sync"
 	"time"
 
+	"battleworld/config"
 	"battleworld/protocol"
 	"battleworld/storage"
 	"battleworld/world"
-)
-
-const (
-	topologyRefreshInterval = 500 * time.Millisecond
-	topologyAuthorityGrace  = 2 * time.Second
 )
 
 type NodeService struct {
 	mu sync.RWMutex
 	// drainMu 与所有会改变 world 的路径配合，确保 BeginDrain 等待已开始的写入结束，
 	// 并在最终 fenced checkpoint 前阻止后续写入。
-	drainMu          sync.RWMutex
-	ID               string
-	Addr             string
-	store            *storage.Store
-	authority        *authorityCache
-	healthy          bool
-	draining         bool
-	lastHeartbeat    time.Time
-	maps             map[string]*world.World
-	replicaSnapshots map[string]protocol.MapCheckpoint
-	replicaMaps      map[string]struct{}
-	ln               net.Listener
-	stopCh           chan struct{}
+	drainMu        sync.RWMutex
+	ID             string
+	Addr           string
+	store          *storage.Store
+	candidateMapID string
+	runtime        config.NodeConfig
+	authority      *authorityCache
+	healthy        bool
+	draining       bool
+	lastHeartbeat  time.Time
+	maps           map[string]*world.World
+	ln             net.Listener
+	stopCh         chan struct{}
 }
 
-func NewNodeService(id, addr string, store *storage.Store) *NodeService {
+// NewNodeService creates a node service with the supplied candidate map and runtime timing.
+func NewNodeService(id, addr string, store *storage.Store, runtime config.NodeConfig, candidateMapID string) *NodeService {
 	return &NodeService{
-		ID:               id,
-		Addr:             addr,
-		store:            store,
-		authority:        newAuthorityCache(id, topologyAuthorityGrace),
-		healthy:          true,
-		lastHeartbeat:    time.Now(),
-		maps:             make(map[string]*world.World),
-		replicaSnapshots: make(map[string]protocol.MapCheckpoint),
-		replicaMaps:      make(map[string]struct{}),
-		stopCh:           make(chan struct{}),
+		ID:             id,
+		Addr:           addr,
+		store:          store,
+		candidateMapID: candidateMapID,
+		runtime:        runtime,
+		authority:      newAuthorityCache(id, runtime.TopologyAuthorityGrace.Duration),
+		healthy:        true,
+		lastHeartbeat:  time.Now(),
+		maps:           make(map[string]*world.World),
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -73,7 +70,6 @@ func (n *NodeService) Start() error {
 	go n.topologyRefreshLoop()
 	go n.flushLoop()
 	go n.tickLoop()
-	go n.replicaSyncLoop()
 	return nil
 }
 
@@ -94,7 +90,7 @@ func (n *NodeService) Stop() error {
 // topologyRefreshLoop 持续拉取已提交 Topology。刷新失败时 authorityCache 只会在
 // 有限宽限期内使用最后快照；宽限期到期后节点必须 fail-closed。
 func (n *NodeService) topologyRefreshLoop() {
-	ticker := time.NewTicker(topologyRefreshInterval)
+	ticker := time.NewTicker(n.runtime.TopologyRefreshInterval.Duration)
 	defer ticker.Stop()
 
 	for {
@@ -120,8 +116,8 @@ func (n *NodeService) refreshTopology() error {
 }
 
 // ensureOwnedMaps 在节点重启或故障切换后的拓扑刷新中，为当前已获得主权的地图恢复本地
-// 运行时。启动参数只声明候选能力；因此此前被提升为 owner 的副本节点重启后，也必须以
-// 已提交 Topology 为准重新装载地图，不能仅依赖 -maps 参数。
+// 运行时。启动参数只声明单一候选地图；此前被提升为 owner 的 standby 节点重启后，也必须
+// 以已提交 Topology 为准重新装载地图，不能仅依赖启动参数。
 func (n *NodeService) ensureOwnedMaps() error {
 	mapIDs, fresh := n.authority.OwnedMapIDs()
 	if !fresh {
@@ -221,6 +217,9 @@ func (n *NodeService) RequirePromotionCandidate(mapID string, targetEpoch uint64
 	if n.IsDraining() {
 		return ErrNodeDraining
 	}
+	if n.candidateMapID != "" && mapID != n.candidateMapID {
+		return fmt.Errorf("%w: node=%q declared_map=%q requested_map=%q", ErrMapPromotionDenied, n.ID, n.candidateMapID, mapID)
+	}
 	if n.authority == nil {
 		return ErrTopologyAuthorityUnavailable
 	}
@@ -228,7 +227,7 @@ func (n *NodeService) RequirePromotionCandidate(mapID string, targetEpoch uint64
 }
 
 func (n *NodeService) flushLoop() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(n.runtime.HotSessionFlushInterval.Duration)
 	defer ticker.Stop()
 
 	// 记录上次 flush 的时间，只清洗有变动的玩家数据
@@ -282,19 +281,10 @@ func (n *NodeService) RemoveHostedMap(mapID string) {
 	delete(n.maps, mapID)
 }
 
-// AddReplicaMap 登记本节点本地预加载的副本地图（由 -replicas 启动参数传入）。
-// 该本地能力不代表路由副本主权；副本归属仅由已提交的 Topology 决定。副本数据由
-// replicaSyncLoop 定期从 Redis 拉取，无需协调器推送。
-func (n *NodeService) AddReplicaMap(mapID string) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.replicaMaps[mapID] = struct{}{}
-}
-
 // tickLoop 是节点自治的核心：驱动世界模拟、发布事件、自落盘 checkpoint。
 // 取代原先协调器 backgroundLoop / checkpointLoop 的「远程驱动」。
 func (n *NodeService) tickLoop() {
-	ticker := time.NewTicker(700 * time.Millisecond)
+	ticker := time.NewTicker(n.runtime.WorldTickInterval.Duration)
 	defer ticker.Stop()
 
 	for {
@@ -343,38 +333,6 @@ func (n *NodeService) tickLoop() {
 	}
 }
 
-// replicaSyncLoop 副本自拉：定期从 Redis 拉取副本地图的最新快照，
-// 供主节点故障时 Promote 使用。对标 Redis/MySQL 主从的「从库拉取」模式。
-func (n *NodeService) replicaSyncLoop() {
-	ticker := time.NewTicker(700 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if n.store == nil {
-				continue
-			}
-			n.mu.RLock()
-			replicaMapIDs := make([]string, 0, len(n.replicaMaps))
-			for mapID := range n.replicaMaps {
-				replicaMapIDs = append(replicaMapIDs, mapID)
-			}
-			n.mu.RUnlock()
-
-			for _, mapID := range replicaMapIDs {
-				if cp, ok := n.store.LoadCheckpoint(mapID); ok && cp.Version > 0 {
-					n.mu.Lock()
-					n.replicaSnapshots[mapID] = *cp
-					n.mu.Unlock()
-				}
-			}
-		case <-n.stopCh:
-			return
-		}
-	}
-}
-
 func (n *NodeService) InstallPrimaryMap(cfg world.MapConfig) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -404,7 +362,7 @@ func (n *NodeService) AddPlayer(ctx context.Context, mapID string, epoch uint64,
 	}
 	defer release()
 	// Gateway 可能在本节点下一轮 topology refresh 前就依据新拓扑发来登录请求；此处
-	// 按已验证的 owner/epoch 惰性补齐地图实例，避免副本提升后的节点重启导致首次登录失败。
+	// 按已验证的 owner/epoch 惰性补齐地图实例，避免 standby 提升后的节点重启导致首次登录失败。
 	if err := n.ensureHostedMap(mapID); err != nil {
 		return fmt.Errorf("准备地图 %q: %w", mapID, err)
 	}
@@ -652,12 +610,11 @@ func (n *NodeService) Promote(mapID string, cfg world.MapConfig, checkpoint prot
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// coordinator 已在 Promote 前验证该 checkpoint 的 owner/epoch/version；节点必须
-	// 使用该精确快照恢复，禁止悄然回退到可能滞后的 replicaSnapshots。
+	// coordinator 已在 Promote 前验证该 checkpoint 的 owner/epoch/version；节点使用
+	// 该精确快照恢复，随后等待提交的新拓扑授予写权限。
 	instance := world.NewWorld(cfg)
 	instance.RestoreCheckpoint(checkpoint)
 	n.maps[mapID] = instance
-	n.replicaSnapshots[mapID] = checkpoint
 	return nil
 }
 
@@ -669,19 +626,13 @@ func (n *NodeService) View() protocol.NodeView {
 	for mapID := range n.maps {
 		primaryMaps = append(primaryMaps, mapID)
 	}
-	replicaMaps := make([]string, 0, len(n.replicaSnapshots))
-	for mapID := range n.replicaSnapshots {
-		replicaMaps = append(replicaMaps, mapID)
-	}
 	sort.Strings(primaryMaps)
-	sort.Strings(replicaMaps)
 
 	return protocol.NodeView{
 		ID:            n.ID,
 		Addr:          n.Addr,
 		Healthy:       n.healthy,
 		PrimaryMaps:   primaryMaps,
-		ReplicaMaps:   replicaMaps,
 		LastHeartbeat: n.lastHeartbeat.Format(time.RFC3339),
 	}
 }

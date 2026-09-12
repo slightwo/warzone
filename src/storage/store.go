@@ -650,15 +650,15 @@ func verifyPassword(hash, password string) bool {
 	return hash == hex.EncodeToString(sum[:])
 }
 
-// NodeRegistryInfo 表示节点在注册中心上报的可达地址和承载候选能力。
+// NodeRegistryInfo 表示节点在注册中心上报的可达地址和单一地图候选能力。
 //
-// Maps 与 Replicas 为兼容既有 JSON 协议保留，它们分别表示声明的主地图候选和
-// 副本地图候选，不代表节点已获得地图路由主权。主从归属只能由已提交的 Topology 决定。
+// MapID 只表示该节点参与哪张地图的 owner 选举，不代表节点已经获得路由主权。
+// 同图的非 owner 健康候选节点由 coordinator 在故障转移时选作 standby；实际所有权
+// 只能由已提交的 Topology 决定。
 type NodeRegistryInfo struct {
-	ID       string   `json:"id"`
-	Addr     string   `json:"addr"`
-	Maps     []string `json:"maps"`
-	Replicas []string `json:"replicas"`
+	ID    string `json:"id"`
+	Addr  string `json:"addr"`
+	MapID string `json:"map_id"`
 	// Draining 表示节点正在执行受控下线。它是候选与连接调度信号，不直接授予或
 	// 收回主权；coordinator 必须通过带 epoch 的拓扑提交完成实际地图移交。
 	Draining bool `json:"draining"`

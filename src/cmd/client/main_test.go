@@ -12,19 +12,19 @@ import (
 type clientTestGateway struct {
 	pb.UnimplementedGatewayServiceServer
 
-	v2Request *pb.ClientEnvelope
+	request *pb.ClientEnvelope
 }
 
-func (s *clientTestGateway) GameStreamV2(stream pb.GatewayService_GameStreamV2Server) error {
+func (s *clientTestGateway) GameStream(stream pb.GatewayService_GameStreamServer) error {
 	request, err := stream.Recv()
 	if err != nil {
 		return err
 	}
-	s.v2Request = request
+	s.request = request
 	if request.GetRequestId() == 0 || request.GetLogin() == nil {
 		return stream.Send(&pb.ServerEnvelope{RequestId: request.GetRequestId(), Payload: &pb.ServerEnvelope_Error{Error: &pb.ErrorResponse{
 			Code:    pb.ErrorCode_ERROR_CODE_INVALID_REQUEST,
-			Message: "expected V2 login",
+			Message: "expected login",
 		}}})
 	}
 	return stream.Send(&pb.ServerEnvelope{RequestId: request.GetRequestId(), Payload: &pb.ServerEnvelope_Authenticated{Authenticated: &pb.Authenticated{
@@ -32,21 +32,21 @@ func (s *clientTestGateway) GameStreamV2(stream pb.GatewayService_GameStreamV2Se
 	}}})
 }
 
-func TestAuthUsesSelectedAddressAndV2(t *testing.T) {
+func TestAuthUsesSelectedAddress(t *testing.T) {
 	gateway := &clientTestGateway{}
 	address, stop := startClientTestGateway(t, gateway)
 	defer stop()
 
 	stream, state, err := auth(address, authModeLogin, "tester", "password", "")
 	if err != nil {
-		t.Fatalf("V2 auth 返回错误: %v", err)
+		t.Fatalf("auth 返回错误: %v", err)
 	}
 	defer stream.Close()
-	if gateway.v2Request == nil || gateway.v2Request.GetRequestId() == 0 || gateway.v2Request.GetLogin().GetUsername() != "tester" {
-		t.Fatalf("V2 认证请求 = %+v", gateway.v2Request)
+	if gateway.request == nil || gateway.request.GetRequestId() == 0 || gateway.request.GetLogin().GetUsername() != "tester" {
+		t.Fatalf("认证请求 = %+v", gateway.request)
 	}
 	if state.GetSessionVersion() != 1 || state.GetMap().GetVersion() != 4 {
-		t.Fatalf("V2 认证状态 = %+v", state)
+		t.Fatalf("认证状态 = %+v", state)
 	}
 }
 

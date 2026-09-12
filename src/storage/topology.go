@@ -34,16 +34,15 @@ var (
 	ErrLeaderTermInvariant = errors.New("leader term invariant violated")
 )
 
-// Topology 是地图路由和主从归属的唯一权威数据源。
+// Topology 是地图路由和所有权 fencing 的唯一权威数据源。
 //
-// 节点通过 NodeRegistryInfo 上报声明能力，但只有已提交的 Topology 才能为地图分配
-// 主节点或副本节点。MapEpochs 为 2.2-C 的所有权 fencing 预留；在 2.2-A 中，
-// 每张纳入拓扑的地图均初始化为 epoch 1。
+// 节点通过 NodeRegistryInfo 只声明一个地图候选。Coordinator 在候选节点间选择 owner；
+// 未当选的健康候选节点自然构成该地图的 standby 集合，不再作为拓扑中的独立角色持久化。
+// MapEpochs 是每张地图所有权变更时递增的 fencing token。
 type Topology struct {
 	Version    uint64            `json:"version"`
 	LeaderTerm uint64            `json:"leader_term"`
 	Owners     map[string]string `json:"owners"`
-	Replicas   map[string]string `json:"replicas"`
 	MapEpochs  map[string]uint64 `json:"map_epochs"`
 	UpdatedAt  time.Time         `json:"updated_at"`
 }
@@ -54,7 +53,6 @@ func (t Topology) Clone() Topology {
 		Version:    t.Version,
 		LeaderTerm: t.LeaderTerm,
 		Owners:     cloneStringMap(t.Owners),
-		Replicas:   cloneStringMap(t.Replicas),
 		MapEpochs:  cloneUint64Map(t.MapEpochs),
 		UpdatedAt:  t.UpdatedAt,
 	}
@@ -66,9 +64,6 @@ func (t Topology) Clone() Topology {
 func (t *Topology) Normalize() {
 	if t.Owners == nil {
 		t.Owners = make(map[string]string)
-	}
-	if t.Replicas == nil {
-		t.Replicas = make(map[string]string)
 	}
 	if t.MapEpochs == nil {
 		t.MapEpochs = make(map[string]uint64)
@@ -86,11 +81,8 @@ func (t Topology) Validate(knownMapIDs map[string]struct{}) error {
 		return errors.New("topology updated_at must be set")
 	}
 
-	mapIDs := make(map[string]struct{}, len(t.Owners)+len(t.Replicas)+len(t.MapEpochs))
+	mapIDs := make(map[string]struct{}, len(t.Owners)+len(t.MapEpochs))
 	for mapID := range t.Owners {
-		mapIDs[mapID] = struct{}{}
-	}
-	for mapID := range t.Replicas {
 		mapIDs[mapID] = struct{}{}
 	}
 	for mapID := range t.MapEpochs {
@@ -114,15 +106,8 @@ func (t Topology) Validate(knownMapIDs map[string]struct{}) error {
 		}
 
 		owner, ownerExists := t.Owners[mapID]
-		replica, replicaExists := t.Replicas[mapID]
 		if ownerExists && owner != "" && (strings.TrimSpace(owner) == "" || owner != strings.TrimSpace(owner)) {
 			return fmt.Errorf("map %q has invalid owner %q", mapID, owner)
-		}
-		if replicaExists && replica != "" && (strings.TrimSpace(replica) == "" || replica != strings.TrimSpace(replica)) {
-			return fmt.Errorf("map %q has invalid replica %q", mapID, replica)
-		}
-		if owner != "" && replica != "" && owner == replica {
-			return fmt.Errorf("map %q uses node %q as both owner and replica", mapID, owner)
 		}
 
 		epoch, epochExists := t.MapEpochs[mapID]

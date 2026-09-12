@@ -272,7 +272,6 @@ func ToNodeView(view protocol.NodeView) *pb.NodeView {
 		Addr:          view.Addr,
 		Healthy:       view.Healthy,
 		PrimaryMaps:   append([]string(nil), view.PrimaryMaps...),
-		ReplicaMaps:   append([]string(nil), view.ReplicaMaps...),
 		LastHeartbeat: view.LastHeartbeat,
 	}
 }
@@ -286,7 +285,6 @@ func FromNodeView(view *pb.NodeView) protocol.NodeView {
 		Addr:          view.GetAddr(),
 		Healthy:       view.GetHealthy(),
 		PrimaryMaps:   append([]string(nil), view.GetPrimaryMaps()...),
-		ReplicaMaps:   append([]string(nil), view.GetReplicaMaps()...),
 		LastHeartbeat: view.GetLastHeartbeat(),
 	}
 }

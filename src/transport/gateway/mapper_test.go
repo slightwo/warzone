@@ -49,7 +49,7 @@ func gatewayTestWorldState() *protocol.WorldState {
 			Treasures: []protocol.TreasureView{{ID: "gold-1", Kind: "gold", X: 8, Y: 2, Value: 3}},
 		},
 		Maps:            []protocol.MapBrief{{ID: "green", Name: "翡翠原野", NodeID: "node-a", Players: 1, NPCs: 1, Treasures: 1, Version: 44, Primary: true, IsCurrent: true, Checkpoint: 41}},
-		Nodes:           []protocol.NodeView{{ID: "node-a", Addr: "127.0.0.1:9311", Healthy: true, PrimaryMaps: []string{"green"}, ReplicaMaps: []string{"cave"}, LastHeartbeat: "2026-09-10T16:00:00Z"}},
+		Nodes:           []protocol.NodeView{{ID: "node-a", Addr: "127.0.0.1:9311", Healthy: true, PrimaryMaps: []string{"green"}, LastHeartbeat: "2026-09-10T16:00:00Z"}},
 		Boss:            protocol.BossView{Name: "巨龙", HP: 900, MaxHP: 1000, Alive: true, LastHit: "hero", RespawnIn: 10, AttackGap: 2, Version: 6, Sites: []protocol.BossSite{{MapID: "green", X: 9, Y: 3}}},
 		Events:          []string{"boss appeared", "hero moved"},
 		SessionVersion:  12,

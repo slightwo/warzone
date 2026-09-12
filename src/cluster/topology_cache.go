@@ -8,10 +8,10 @@ import (
 	"battleworld/storage"
 )
 
-const topologySyncInterval = 500 * time.Millisecond
+const fallbackTopologySyncInterval = 500 * time.Millisecond
 
 // applyTopologyLocked 校验并应用一份已提交的拓扑快照。调用方必须持有 c.mu 写锁。
-// owners 与 replicas 是已提交拓扑的网关只读缓存，唯一写入入口是本方法。
+// owners 是已提交拓扑的网关只读缓存，唯一写入入口是本方法。
 func (c *Cluster) applyTopologyLocked(topology storage.Topology) (bool, error) {
 	knownMapIDs := make(map[string]struct{}, len(c.configs))
 	for mapID := range c.configs {
@@ -27,12 +27,8 @@ func (c *Cluster) applyTopologyLocked(topology storage.Topology) (bool, error) {
 	c.topology = topology.Clone()
 	c.topologyLoaded = true
 	c.owners = make(map[string]string, len(c.topology.Owners))
-	c.replicas = make(map[string]string, len(c.topology.Replicas))
 	for mapID, nodeID := range c.topology.Owners {
 		c.owners[mapID] = nodeID
-	}
-	for mapID, nodeID := range c.topology.Replicas {
-		c.replicas[mapID] = nodeID
 	}
 	c.mapCacheMu.Lock()
 	c.mapCache = make(map[string]MapCacheData)
@@ -66,7 +62,11 @@ func (c *Cluster) loadTopology() (bool, error) {
 
 // topologySyncLoop 是 Pub/Sub 通知之外的兜底机制，避免网关漏掉拓扑变更通知。
 func (c *Cluster) topologySyncLoop() {
-	ticker := time.NewTicker(topologySyncInterval)
+	interval := fallbackTopologySyncInterval
+	if c.runtime.TopologyRefreshInterval.Duration > 0 {
+		interval = c.runtime.TopologyRefreshInterval.Duration
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {

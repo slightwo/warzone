@@ -1,6 +1,6 @@
 // Package gateway owns protobuf mappings at the Gateway transport boundary.
 // Domain packages stay protobuf-free; this package is the only place that maps
-// protocol read models to Gateway V2 wire messages.
+// protocol read models to Gateway wire messages.
 package gateway
 
 import (
@@ -63,14 +63,14 @@ func FromMapBrief(brief *pb.MapBrief) protocol.MapBrief {
 }
 
 func ToNodeView(view protocol.NodeView) *pb.NodeView {
-	return &pb.NodeView{Id: view.ID, Addr: view.Addr, Healthy: view.Healthy, PrimaryMaps: append([]string(nil), view.PrimaryMaps...), ReplicaMaps: append([]string(nil), view.ReplicaMaps...), LastHeartbeat: view.LastHeartbeat}
+	return &pb.NodeView{Id: view.ID, Addr: view.Addr, Healthy: view.Healthy, PrimaryMaps: append([]string(nil), view.PrimaryMaps...), LastHeartbeat: view.LastHeartbeat}
 }
 
 func FromNodeView(view *pb.NodeView) protocol.NodeView {
 	if view == nil {
 		return protocol.NodeView{}
 	}
-	return protocol.NodeView{ID: view.GetId(), Addr: view.GetAddr(), Healthy: view.GetHealthy(), PrimaryMaps: append([]string(nil), view.GetPrimaryMaps()...), ReplicaMaps: append([]string(nil), view.GetReplicaMaps()...), LastHeartbeat: view.GetLastHeartbeat()}
+	return protocol.NodeView{ID: view.GetId(), Addr: view.GetAddr(), Healthy: view.GetHealthy(), PrimaryMaps: append([]string(nil), view.GetPrimaryMaps()...), LastHeartbeat: view.GetLastHeartbeat()}
 }
 
 func ToMapView(view protocol.MapView) *pb.MapView {

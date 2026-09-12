@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 
 	"battleworld/cluster"
+	"battleworld/config"
 	"battleworld/lifecycle"
 	"battleworld/pb"
 	"battleworld/protocol"
@@ -24,9 +25,10 @@ import (
 	_ "net/http/pprof" // 注册 /debug/pprof/ 性能分析端点。
 )
 
+// defaultGameStreamStateInterval 仅供未注入运行时配置的旧测试使用。
 const defaultGameStreamStateInterval = 100 * time.Millisecond
 
-// gatewayBackend 是 GatewayService 的 V2 游戏流和 AdminService 依赖的最小业务能力集合。
+// gatewayBackend 是 GatewayService 的游戏流和 AdminService 依赖的最小业务能力集合。
 // 保持传输 handler 与具体 Cluster 实现解耦，使协议行为可在不依赖 Redis 或 PostgreSQL 的
 // 情况下被表征测试覆盖。
 type gatewayBackend interface {
@@ -62,9 +64,17 @@ func main() {
 	lifecycleAddr := flag.String("lifecycle-addr", "", "生命周期 HTTP 监听地址；为空时禁用（如：127.0.0.1:9413）")
 	flag.Parse()
 
-	go func() {
-		_ = http.ListenAndServe("localhost:6060", nil)
-	}()
+	runtime, err := config.LoadRuntime()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "加载运行时配置失败：%v\n", err)
+		os.Exit(1)
+	}
+
+	if runtime.HTTP.PprofEnabled {
+		go func() {
+			_ = http.ListenAndServe(runtime.HTTP.PprofAddr, nil)
+		}()
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -76,7 +86,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	gameCluster, err := cluster.NewCluster(store)
+	gameCluster, err := cluster.NewClusterWithConfig(store, runtime.Gateway)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "初始化集群失败：%v\n", err)
 		os.Exit(1)
@@ -95,14 +105,14 @@ func main() {
 	defer ln.Close()
 
 	grpcServer := grpc.NewServer()
-	gatewayServer := &GatewayServer{gameCluster: gameCluster}
+	gatewayServer := &GatewayServer{gameCluster: gameCluster, stateInterval: runtime.Gateway.StreamStateInterval.Duration}
 	pb.RegisterGatewayServiceServer(grpcServer, gatewayServer)
 	pb.RegisterAdminServiceServer(grpcServer, gatewayServer)
 
 	// draining 标志在 drain 期间返回 503，让调度器停止把新会话路由到本网关。
 	var draining atomic.Bool
 	if *lifecycleAddr != "" {
-		go serveGatewayLifecycle(*lifecycleAddr, grpcServer, &draining)
+		go serveGatewayLifecycle(*lifecycleAddr, grpcServer, &draining, runtime)
 	}
 
 	fmt.Printf("gRPC 网关已启动：%s\n", protocol.GatewayAddr)
@@ -119,7 +129,7 @@ func main() {
 
 // serveGatewayLifecycle 暴露 /healthz、/readyz、/drain。gateway 的 drain 仅停止接收
 // 新会话，不会主动断开现有 stream；运维应在 drain 完成后再发送 SIGTERM。
-func serveGatewayLifecycle(addr string, grpcServer *grpc.Server, draining *atomic.Bool) {
+func serveGatewayLifecycle(addr string, grpcServer *grpc.Server, draining *atomic.Bool, runtime config.RuntimeConfig) {
 	handler := lifecycle.NewHandler(lifecycle.Callbacks{
 		Status: func() lifecycle.Status {
 			return lifecycle.Status{Draining: draining.Load()}
@@ -138,7 +148,7 @@ func serveGatewayLifecycle(addr string, grpcServer *grpc.Server, draining *atomi
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: runtime.HTTP.LifecycleReadHeaderTimeout.Duration,
 	}
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, "gateway lifecycle 监听失败：%v\n", err)

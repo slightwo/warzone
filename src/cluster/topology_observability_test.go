@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"battleworld/config"
 	"battleworld/protocol"
 	"battleworld/storage"
 	gatewaywire "battleworld/transport/gateway"
@@ -25,11 +26,9 @@ func TestSnapshotForExposesTopologyVersionAndMapEpoch(t *testing.T) {
 		nodeTargets: map[string]string{ownerID: "127.0.0.1:9311"},
 		configs:     testMapConfigs(mapID),
 		owners:      map[string]string{mapID: ownerID},
-		replicas:    map[string]string{},
 		topology: storage.Topology{
 			Version:   3,
 			Owners:    map[string]string{mapID: ownerID},
-			Replicas:  map[string]string{},
 			MapEpochs: map[string]uint64{mapID: 7},
 			UpdatedAt: time.Now().UTC(),
 		},
@@ -37,6 +36,7 @@ func TestSnapshotForExposesTopologyVersionAndMapEpoch(t *testing.T) {
 		mapCache: map[string]MapCacheData{
 			mapID: {Brief: protocol.MapBrief{ID: mapID, NodeID: ownerID}, View: &protocol.MapView{ID: mapID, NodeID: ownerID}},
 		},
+	runtime: config.DefaultRuntime().Gateway,
 		mapEvents:  map[string][]string{},
 		userEvents: map[string][]string{},
 	}

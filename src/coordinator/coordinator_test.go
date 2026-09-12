@@ -273,8 +273,8 @@ func TestBootstrapTopologyIfAbsentCommitsAndPublishes(t *testing.T) {
 	store := &fakeControlStore{}
 	coordinator := newTestCoordinator(t, store)
 	nodes := []storage.NodeRegistryInfo{
-		{ID: "node-a", Addr: "127.0.0.1:9311", Maps: []string{"green"}},
-		{ID: "node-b", Addr: "127.0.0.1:9312", Replicas: []string{"green"}},
+		{ID: "node-a", Addr: "127.0.0.1:9311", MapID: "green"},
+		{ID: "node-b", Addr: "127.0.0.1:9312", MapID: "green"},
 	}
 
 	if err := coordinator.bootstrapTopologyIfAbsent(nodes); err != nil {
@@ -297,7 +297,6 @@ func TestBootstrapTopologyIfAbsentNeverOverwritesExistingTopology(t *testing.T) 
 	existing := storage.Topology{
 		Version:   4,
 		Owners:    map[string]string{"green": "node-existing"},
-		Replicas:  map[string]string{"green": "node-replica"},
 		MapEpochs: map[string]uint64{"green": 3},
 	}
 	store := &fakeControlStore{topology: &existing}
@@ -357,16 +356,20 @@ func TestConnectedNodeRegistrationsAndHeartbeat(t *testing.T) {
 	}
 }
 
-func TestFailoverPromotesReplicaAndMigratesSessions(t *testing.T) {
+func TestFailoverPromotesStandbyAndMigratesSessions(t *testing.T) {
 	current := storage.Topology{
 		Version:   7,
 		Owners:    map[string]string{"green": "node-a"},
-		Replicas:  map[string]string{"green": "node-b"},
 		MapEpochs: map[string]uint64{"green": 4},
 		UpdatedAt: time.Now().UTC(),
 	}
 	checkpoint := protocol.MapCheckpoint{MapID: "green", NodeID: "node-a", MapEpoch: 4, Version: 12}
 	store := &fakeControlStore{
+		activeNodes: []storage.NodeRegistryInfo{
+			{ID: "node-c", Addr: "127.0.0.1:9313", MapID: "green"},
+			{ID: "node-b", Addr: "127.0.0.1:9312", MapID: "green"},
+			{ID: "node-d", Addr: "127.0.0.1:9314", MapID: "cave"},
+		},
 		topology:   &current,
 		checkpoint: &checkpoint,
 		sessions:   []storage.GlobalSession{{Username: "player-a", MapID: "green", NodeID: "node-a", Version: 3}},
@@ -393,9 +396,6 @@ func TestFailoverPromotesReplicaAndMigratesSessions(t *testing.T) {
 	if store.topology.Version != 8 || store.topology.Owners["green"] != "node-b" || store.topology.MapEpochs["green"] != 5 {
 		t.Fatalf("错误的故障转移拓扑: %+v", store.topology)
 	}
-	if replicaID := store.topology.Replicas["green"]; replicaID != "" {
-		t.Fatalf("故障或 drain 中的旧 owner 不得被复用为副本，replica=%q", replicaID)
-	}
 	if len(store.sessions) != 1 || store.sessions[0].NodeID != "node-b" || store.sessions[0].Version != 4 {
 		t.Fatalf("会话未原子迁移: %+v", store.sessions)
 	}
@@ -413,15 +413,15 @@ func TestFailoverPromoteFailureLeavesTopologyAndSessionUntouched(t *testing.T) {
 	current := storage.Topology{
 		Version:   7,
 		Owners:    map[string]string{"green": "node-a"},
-		Replicas:  map[string]string{"green": "node-b"},
 		MapEpochs: map[string]uint64{"green": 4},
 		UpdatedAt: time.Now().UTC(),
 	}
 	checkpoint := protocol.MapCheckpoint{MapID: "green", NodeID: "node-a", MapEpoch: 4, Version: 12}
 	store := &fakeControlStore{
-		topology:   &current,
-		checkpoint: &checkpoint,
-		sessions:   []storage.GlobalSession{{Username: "player-a", MapID: "green", NodeID: "node-a", Version: 3}},
+		activeNodes: []storage.NodeRegistryInfo{{ID: "node-b", Addr: "127.0.0.1:9312", MapID: "green"}},
+		topology:    &current,
+		checkpoint:  &checkpoint,
+		sessions:    []storage.GlobalSession{{Username: "player-a", MapID: "green", NodeID: "node-a", Version: 3}},
 	}
 	replica := &fakeCoordinatorNodeClient{id: "node-b", promoteErr: errors.New("promote failed")}
 	coordinator, err := newCoordinator(store, func(string, string) (cluster.CoordinatorNodeClient, error) {
@@ -452,22 +452,25 @@ func TestFailoverDoesNotCommitAfterLeaderLeaseLoss(t *testing.T) {
 		Version:    7,
 		LeaderTerm: 8,
 		Owners:     map[string]string{"green": "node-a"},
-		Replicas:   map[string]string{"green": "node-b"},
 		MapEpochs:  map[string]uint64{"green": 4},
 		UpdatedAt:  time.Now().UTC(),
 	}
 	checkpoint := protocol.MapCheckpoint{MapID: "green", NodeID: "node-a", MapEpoch: 4, Version: 12}
-	store := &fakeControlStore{topology: &current, checkpoint: &checkpoint}
+	store := &fakeControlStore{
+		activeNodes: []storage.NodeRegistryInfo{{ID: "node-b", Addr: "127.0.0.1:9312", MapID: "green"}},
+		topology:    &current,
+		checkpoint:  &checkpoint,
+	}
 	selectedElector := newFakeLeaderElector(9)
-	replica := &fakeCoordinatorNodeClient{id: "node-b", onPromote: selectedElector.loseLeadership}
+	standby := &fakeCoordinatorNodeClient{id: "node-b", onPromote: selectedElector.loseLeadership}
 	coordinator, err := newCoordinatorWithElector(store, selectedElector, func(string, string) (cluster.CoordinatorNodeClient, error) {
-		return replica, nil
+		return standby, nil
 	}, []world.MapConfig{{ID: "green"}})
 	if err != nil {
 		t.Fatalf("创建 coordinator: %v", err)
 	}
 	coordinator.mu.Lock()
-	coordinator.nodes["node-b"] = nodeConnection{client: replica, healthy: true}
+	coordinator.nodes["node-b"] = nodeConnection{client: standby, healthy: true}
 	coordinator.mu.Unlock()
 
 	if err := coordinator.failoverMap("green", "node-a"); err == nil {
@@ -491,8 +494,8 @@ func TestNonLeaderDoesNotBootstrapTopology(t *testing.T) {
 		t.Fatalf("创建 coordinator: %v", err)
 	}
 	if err := coordinator.bootstrapTopologyIfAbsent([]storage.NodeRegistryInfo{
-		{ID: "node-a", Maps: []string{"green"}},
-		{ID: "node-b", Replicas: []string{"green"}},
+		{ID: "node-a", Addr: "127.0.0.1:9311", MapID: "green"},
+		{ID: "node-b", Addr: "127.0.0.1:9312", MapID: "green"},
 	}); err != nil {
 		t.Fatalf("non-leader bootstrap: %v", err)
 	}

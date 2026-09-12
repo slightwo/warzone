@@ -12,10 +12,7 @@ import (
 	"battleworld/storage"
 )
 
-const (
-	defaultBossHP    int32 = 1600
-	bossSyncInterval       = time.Second
-)
+const defaultBossHP int32 = 1600
 
 // ensureBoss 只负责首次初始化。之后的生命值和死亡状态由节点侧原子 Boss RPC 更新，
 // coordinator 仅在满足复活时间后恢复全局状态。
@@ -46,7 +43,7 @@ func (c *Coordinator) ensureBoss() error {
 }
 
 func (c *Coordinator) bossLoop(leaderCtx context.Context) {
-	ticker := time.NewTicker(bossSyncInterval)
+	ticker := time.NewTicker(c.bossReconcileInterval)
 	defer ticker.Stop()
 
 	for {

@@ -16,7 +16,7 @@ var (
 	ErrTopologyAuthorityUnavailable = errors.New("topology authority unavailable")
 	// ErrMapAuthorityDenied 表示当前节点不是请求地图在指定 epoch 下的 owner。
 	ErrMapAuthorityDenied = errors.New("map authority denied")
-	// ErrMapPromotionDenied 表示当前节点不是可被提升为下一 epoch owner 的健康副本。
+	// ErrMapPromotionDenied 表示当前节点不是可被提升为下一 epoch owner 的同图 standby。
 	ErrMapPromotionDenied = errors.New("map promotion denied")
 )
 
@@ -140,17 +140,20 @@ func (c *authorityCache) OwnedMapIDs() ([]string, bool) {
 	return mapIDs, true
 }
 
-// RequirePromotionCandidate 在 topology 尚未提交前允许 coordinator 对当前副本执行
-// 准备提升。它不会授予写权限；实际 tick 和玩家写入仍须等新 Topology 提交后经 Require
-// 成功校验。
+// RequirePromotionCandidate 在 topology 尚未提交前允许 coordinator 对一个非 owner
+// 的同图候选节点执行准备提升。候选资格由 coordinator 依据注册表验证；节点侧只验证
+// 自己尚未拥有该地图、拓扑仍新鲜且目标 epoch 连续。它不会授予写权限，实际 tick 和
+// 玩家写入仍须等待新 Topology 提交后经 Require 成功校验。
 func (c *authorityCache) RequirePromotionCandidate(mapID string, targetEpoch uint64) error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if !c.freshLocked() {
 		return fmt.Errorf("%w: last topology refresh=%s", ErrTopologyAuthorityUnavailable, c.loadedAt.Format(time.RFC3339Nano))
 	}
-	if c.topology.Replicas[mapID] != c.nodeID || c.topology.MapEpochs[mapID] == 0 || targetEpoch != c.topology.MapEpochs[mapID]+1 {
-		return fmt.Errorf("%w: map=%q target_epoch=%d replica=%q current_epoch=%d local_node=%q", ErrMapPromotionDenied, mapID, targetEpoch, c.topology.Replicas[mapID], c.topology.MapEpochs[mapID], c.nodeID)
+	owner := c.topology.Owners[mapID]
+	currentEpoch := c.topology.MapEpochs[mapID]
+	if owner == "" || owner == c.nodeID || currentEpoch == 0 || targetEpoch != currentEpoch+1 {
+		return fmt.Errorf("%w: map=%q target_epoch=%d owner=%q current_epoch=%d local_node=%q", ErrMapPromotionDenied, mapID, targetEpoch, owner, currentEpoch, c.nodeID)
 	}
 	return nil
 }

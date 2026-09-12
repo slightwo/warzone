@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"battleworld/config"
 	"battleworld/pb"
 	"battleworld/storage"
 
@@ -21,13 +22,13 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-const nodeV2TestBufferSize = 1024 * 1024
+const nodeTestBufferSize = 1024 * 1024
 
-func TestNodeV2PingUsesTypedService(t *testing.T) {
-	service := NewNodeService("node-a", "", nil)
-	listener := bufconn.Listen(nodeV2TestBufferSize)
+func TestNodePingUsesTypedService(t *testing.T) {
+	service := NewNodeService("node-a", "", nil, config.DefaultRuntime().Node, "")
+	listener := bufconn.Listen(nodeTestBufferSize)
 	server := grpc.NewServer()
-	pb.RegisterNodeServiceV2Server(server, NewNodeV2GRPCServer(service))
+	pb.RegisterNodeServiceServer(server, NewNodeGRPCServer(service))
 	go func() { _ = server.Serve(listener) }()
 	defer server.Stop()
 	defer listener.Close()
@@ -35,7 +36,7 @@ func TestNodeV2PingUsesTypedService(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	conn, err := grpc.NewClient(
-		"passthrough:///node-v2-test",
+		"passthrough:///node-test",
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
@@ -44,25 +45,25 @@ func TestNodeV2PingUsesTypedService(t *testing.T) {
 	}
 	defer conn.Close()
 
-	response, err := pb.NewNodeServiceV2Client(conn).Ping(ctx, &pb.NodePingRequest{})
+	response, err := pb.NewNodeServiceClient(conn).Ping(ctx, &pb.NodePingRequest{})
 	if err != nil {
-		t.Fatalf("V2 Ping: %v", err)
+		t.Fatalf("Ping: %v", err)
 	}
 	if response.GetObservedAt() == nil || response.GetObservedAt().CheckValid() != nil {
-		t.Fatalf("V2 Ping observed_at 无效: %v", response.GetObservedAt())
+		t.Fatalf("Ping observed_at 无效: %v", response.GetObservedAt())
 	}
 }
 
-func TestNodeV2AcceptsCurrentAuthorityAndRejectsOldEpoch(t *testing.T) {
+func TestNodeAcceptsCurrentAuthorityAndRejectsOldEpoch(t *testing.T) {
 	store := newNodeTestStore(t)
-	initial := nodeTestTopology("node-a", "node-b", 1, 1)
+	initial := nodeTestTopology("node-a", 1, 1)
 	if err := store.CompareAndSaveTopology(0, initial); err != nil {
 		t.Fatalf("提交初始 fence: %v", err)
 	}
 	service := newAuthorizedNodeService(t, "node-a", store, initial)
-	listener := bufconn.Listen(nodeV2TestBufferSize)
+	listener := bufconn.Listen(nodeTestBufferSize)
 	server := grpc.NewServer()
-	pb.RegisterNodeServiceV2Server(server, NewNodeV2GRPCServer(service))
+	pb.RegisterNodeServiceServer(server, NewNodeGRPCServer(service))
 	go func() { _ = server.Serve(listener) }()
 	defer server.Stop()
 	defer listener.Close()
@@ -70,29 +71,29 @@ func TestNodeV2AcceptsCurrentAuthorityAndRejectsOldEpoch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	conn, err := grpc.NewClient(
-		"passthrough:///node-v2-authority-test",
+		"passthrough:///node-authority-test",
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		t.Fatalf("创建 V2 测试客户端: %v", err)
+		t.Fatalf("创建测试客户端: %v", err)
 	}
 	defer conn.Close()
-	client := pb.NewNodeServiceV2Client(conn)
+	client := pb.NewNodeServiceClient(conn)
 
 	_, err = client.AddPlayer(ctx, &pb.NodeAddPlayerRequest{
 		Authority: &pb.MapAuthority{MapId: "green", OwnerNodeId: "node-a", MapEpoch: 1},
 		Player:    &pb.PlayerState{Username: "current", LastMap: "green", LastNode: "node-a", Hp: 99, MaxHp: 100, Alive: true},
 	})
 	if err != nil {
-		t.Fatalf("当前 owner/epoch 的 V2 AddPlayer: %v", err)
+		t.Fatalf("当前 owner/epoch 的 AddPlayer: %v", err)
 	}
 	profile, err := client.Profile(ctx, &pb.NodeProfileRequest{MapId: "green", Username: "current"})
 	if err != nil || !profile.GetFound() || profile.GetPlayer().GetHp() != 99 {
-		t.Fatalf("V2 Profile = %+v, err=%v", profile, err)
+		t.Fatalf("Profile = %+v, err=%v", profile, err)
 	}
 
-	next := nodeTestTopology("node-b", "node-a", 2, 2)
+	next := nodeTestTopology("node-b", 2, 2)
 	if err := store.CompareAndSaveTopology(1, next); err != nil {
 		t.Fatalf("切换 Redis fence: %v", err)
 	}
@@ -111,13 +112,13 @@ func TestNodeV2AcceptsCurrentAuthorityAndRejectsOldEpoch(t *testing.T) {
 	}
 }
 
-func TestNodeV2RejectsEmptyPlayerUsername(t *testing.T) {
+func TestNodeRejectsEmptyPlayerUsername(t *testing.T) {
 	store := newNodeTestStore(t)
-	topology := nodeTestTopology("node-a", "node-b", 1, 1)
+	topology := nodeTestTopology("node-a", 1, 1)
 	if err := store.CompareAndSaveTopology(0, topology); err != nil {
 		t.Fatalf("提交初始 fence: %v", err)
 	}
-	server := NewNodeV2GRPCServer(newAuthorizedNodeService(t, "node-a", store, topology))
+	server := NewNodeGRPCServer(newAuthorizedNodeService(t, "node-a", store, topology))
 	_, err := server.AddPlayer(context.Background(), &pb.NodeAddPlayerRequest{
 		Authority: &pb.MapAuthority{MapId: "green", OwnerNodeId: "node-a", MapEpoch: 1},
 		Player:    &pb.PlayerState{Username: " \t "},
@@ -133,7 +134,7 @@ func TestNodeV2RejectsEmptyPlayerUsername(t *testing.T) {
 
 func newAuthorizedNodeService(t *testing.T, nodeID string, store *storage.Store, _ storage.Topology) *NodeService {
 	t.Helper()
-	service := NewNodeService(nodeID, "", store)
+	service := NewNodeService(nodeID, "", store, config.DefaultRuntime().Node, "")
 	if err := service.authority.refresh(store); err != nil {
 		t.Fatalf("初始化测试拓扑缓存: %v", err)
 	}
@@ -185,18 +186,17 @@ func newNodeTestStore(t *testing.T) *storage.Store {
 	return store
 }
 
-func nodeTestTopology(owner, replica string, version, epoch uint64) storage.Topology {
+func nodeTestTopology(owner string, version, epoch uint64) storage.Topology {
 	return storage.Topology{
 		Version:   version,
 		Owners:    map[string]string{"green": owner},
-		Replicas:  map[string]string{"green": replica},
 		MapEpochs: map[string]uint64{"green": epoch},
 		UpdatedAt: time.Now().UTC(),
 	}
 }
 
-func TestNodeV2RejectsMalformedAuthorityAndCheckpoint(t *testing.T) {
-	server := NewNodeV2GRPCServer(NewNodeService("node-a", "", nil))
+func TestNodeRejectsMalformedAuthorityAndCheckpoint(t *testing.T) {
+	server := NewNodeGRPCServer(NewNodeService("node-a", "", nil, config.DefaultRuntime().Node, ""))
 
 	_, err := server.AddPlayer(context.Background(), &pb.NodeAddPlayerRequest{})
 	if got := status.Code(err); got != codes.InvalidArgument {

@@ -149,13 +149,13 @@ func testWorldState() *protocol.WorldState {
 	}
 }
 
-func newGatewayV2TestStream(t *testing.T, backend gatewayBackend) (pb.GatewayService_GameStreamV2Client, func()) {
+func newGatewayTestStream(t *testing.T, backend gatewayBackend) (pb.GatewayService_GameStreamClient, func()) {
 	t.Helper()
 	ctx, gatewayClient, _, closeClient := newGatewayTestClients(t, backend)
-	stream, err := gatewayClient.GameStreamV2(ctx)
+	stream, err := gatewayClient.GameStream(ctx)
 	if err != nil {
 		closeClient()
-		t.Fatalf("打开 V2 测试游戏流: %v", err)
+		t.Fatalf("打开测试游戏流: %v", err)
 	}
 	return stream, closeClient
 }

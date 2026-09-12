@@ -23,7 +23,7 @@ const (
 )
 
 // Direction is deliberately closed at the Gateway boundary. UNSPECIFIED and unknown
-// numeric values are invalid client input and must be rejected by the V2 handler.
+// numeric values are invalid client input and must be rejected by the stream handler.
 type Direction int32
 
 const (
@@ -596,7 +596,6 @@ type NodeView struct {
 	Addr          string                 `protobuf:"bytes,2,opt,name=addr,proto3" json:"addr,omitempty"`
 	Healthy       bool                   `protobuf:"varint,3,opt,name=healthy,proto3" json:"healthy,omitempty"`
 	PrimaryMaps   []string               `protobuf:"bytes,4,rep,name=primary_maps,json=primaryMaps,proto3" json:"primary_maps,omitempty"`
-	ReplicaMaps   []string               `protobuf:"bytes,5,rep,name=replica_maps,json=replicaMaps,proto3" json:"replica_maps,omitempty"`
 	LastHeartbeat string                 `protobuf:"bytes,6,opt,name=last_heartbeat,json=lastHeartbeat,proto3" json:"last_heartbeat,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -656,13 +655,6 @@ func (x *NodeView) GetHealthy() bool {
 func (x *NodeView) GetPrimaryMaps() []string {
 	if x != nil {
 		return x.PrimaryMaps
-	}
-	return nil
-}
-
-func (x *NodeView) GetReplicaMaps() []string {
-	if x != nil {
-		return x.ReplicaMaps
 	}
 	return nil
 }
@@ -1069,7 +1061,7 @@ func (x *WorldState) GetMapEpoch() uint64 {
 // ClientEnvelope carries exactly one authentication request or player command.
 // request_id must be non-zero and unique among a live client's outstanding requests.
 // An empty payload, an unknown enum value, or a command before authentication is an
-// INVALID_REQUEST in the V2 handler.
+// INVALID_REQUEST in the stream handler.
 type ClientEnvelope struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -1288,7 +1280,7 @@ func (*ClientEnvelope_SwitchMap) isClientEnvelope_Payload() {}
 
 func (*ClientEnvelope_Logout) isClientEnvelope_Payload() {}
 
-// LoginRequest is the initial credential exchange for an existing player. V2 terminal
+// LoginRequest is the initial credential exchange for an existing player. Terminal
 // APIs intentionally never expose a password_hash field.
 type LoginRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1732,7 +1724,7 @@ func (*LogoutCommand) Descriptor() ([]byte, []int) {
 	return file_pb_battle_proto_rawDescGZIP(), []int{19}
 }
 
-// ServerEnvelope is written by a single V2 stream writer. Authentication outcomes,
+// ServerEnvelope is written by a single stream writer. Authentication outcomes,
 // command outcomes, errors, and notices are reliable control messages. State updates
 // are mergeable: an implementation may replace queued state with the latest snapshot.
 type ServerEnvelope struct {
@@ -2175,7 +2167,7 @@ func (x *GatewayStatusResponse) GetSummary() string {
 	return ""
 }
 
-// MapAuthority is the immutable topology proof attached to every V2 map write.
+// MapAuthority is the immutable topology proof attached to every map write.
 // owner_node_id allows nodes to reject malformed calls before their local/Redis
 // authority checks; map_epoch is the fencing token enforced at the write point.
 type MapAuthority struct {
@@ -3812,13 +3804,12 @@ const file_pb_battle_proto_rawDesc = "" +
 	"\n" +
 	"checkpoint\x18\n" +
 	" \x01(\x03R\n" +
-	"checkpoint\"\xb5\x01\n" +
+	"checkpoint\"\x92\x01\n" +
 	"\bNodeView\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x12\x18\n" +
 	"\ahealthy\x18\x03 \x01(\bR\ahealthy\x12!\n" +
-	"\fprimary_maps\x18\x04 \x03(\tR\vprimaryMaps\x12!\n" +
-	"\freplica_maps\x18\x05 \x03(\tR\vreplicaMaps\x12%\n" +
+	"\fprimary_maps\x18\x04 \x03(\tR\vprimaryMaps\x12%\n" +
 	"\x0elast_heartbeat\x18\x06 \x01(\tR\rlastHeartbeat\"\xa3\x02\n" +
 	"\aMapView\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -4042,12 +4033,13 @@ const file_pb_battle_proto_rawDesc = "" +
 	"\x1aERROR_CODE_ROUTE_NOT_READY\x10\x03\x12\x1a\n" +
 	"\x16ERROR_CODE_STALE_ROUTE\x10\x04\x12\x1f\n" +
 	"\x1bERROR_CODE_COMMAND_REJECTED\x10\x05\x12\x17\n" +
-	"\x13ERROR_CODE_INTERNAL\x10\x062L\n" +
-	"\x0eGatewayService\x12:\n" +
-	"\fGameStreamV2\x12\x12.pb.ClientEnvelope\x1a\x12.pb.ServerEnvelope(\x010\x012W\n" +
+	"\x13ERROR_CODE_INTERNAL\x10\x062J\n" +
+	"\x0eGatewayService\x128\n" +
+	"\n" +
+	"GameStream\x12\x12.pb.ClientEnvelope\x1a\x12.pb.ServerEnvelope(\x010\x012W\n" +
 	"\fAdminService\x12G\n" +
-	"\x10GetGatewayStatus\x12\x18.pb.GatewayStatusRequest\x1a\x19.pb.GatewayStatusResponse2\xbe\a\n" +
-	"\rNodeServiceV2\x121\n" +
+	"\x10GetGatewayStatus\x12\x18.pb.GatewayStatusRequest\x1a\x19.pb.GatewayStatusResponse2\xbc\a\n" +
+	"\vNodeService\x121\n" +
 	"\x04Ping\x12\x13.pb.NodePingRequest\x1a\x14.pb.NodePingResponse\x12@\n" +
 	"\tAddPlayer\x12\x18.pb.NodeAddPlayerRequest\x1a\x19.pb.NodeAddPlayerResponse\x12I\n" +
 	"\fRemovePlayer\x12\x1b.pb.NodeRemovePlayerRequest\x1a\x1c.pb.NodeRemovePlayerResponse\x12E\n" +
@@ -4193,40 +4185,40 @@ var file_pb_battle_proto_depIdxs = []int32{
 	29, // 48: pb.NodePromoteRequest.authority:type_name -> pb.MapAuthority
 	52, // 49: pb.NodePromoteRequest.checkpoint:type_name -> pb.NodeCheckpoint
 	6,  // 50: pb.NodeViewResponse.view:type_name -> pb.NodeView
-	11, // 51: pb.GatewayService.GameStreamV2:input_type -> pb.ClientEnvelope
+	11, // 51: pb.GatewayService.GameStream:input_type -> pb.ClientEnvelope
 	27, // 52: pb.AdminService.GetGatewayStatus:input_type -> pb.GatewayStatusRequest
-	31, // 53: pb.NodeServiceV2.Ping:input_type -> pb.NodePingRequest
-	33, // 54: pb.NodeServiceV2.AddPlayer:input_type -> pb.NodeAddPlayerRequest
-	35, // 55: pb.NodeServiceV2.RemovePlayer:input_type -> pb.NodeRemovePlayerRequest
-	37, // 56: pb.NodeServiceV2.MovePlayer:input_type -> pb.NodeMovePlayerRequest
-	41, // 57: pb.NodeServiceV2.Attack:input_type -> pb.NodeAttackRequest
-	38, // 58: pb.NodeServiceV2.Heal:input_type -> pb.NodePlayerRequest
-	39, // 59: pb.NodeServiceV2.BuyItem:input_type -> pb.NodeBuyItemRequest
-	38, // 60: pb.NodeServiceV2.AttackBoss:input_type -> pb.NodePlayerRequest
-	43, // 61: pb.NodeServiceV2.Profile:input_type -> pb.NodeProfileRequest
-	45, // 62: pb.NodeServiceV2.RewardPlayer:input_type -> pb.NodeRewardPlayerRequest
-	46, // 63: pb.NodeServiceV2.Snapshot:input_type -> pb.NodeSnapshotRequest
-	48, // 64: pb.NodeServiceV2.Counts:input_type -> pb.NodeCountsRequest
-	50, // 65: pb.NodeServiceV2.Checkpoint:input_type -> pb.NodeCheckpointRequest
-	53, // 66: pb.NodeServiceV2.Promote:input_type -> pb.NodePromoteRequest
-	55, // 67: pb.NodeServiceV2.View:input_type -> pb.NodeViewRequest
-	22, // 68: pb.GatewayService.GameStreamV2:output_type -> pb.ServerEnvelope
+	31, // 53: pb.NodeService.Ping:input_type -> pb.NodePingRequest
+	33, // 54: pb.NodeService.AddPlayer:input_type -> pb.NodeAddPlayerRequest
+	35, // 55: pb.NodeService.RemovePlayer:input_type -> pb.NodeRemovePlayerRequest
+	37, // 56: pb.NodeService.MovePlayer:input_type -> pb.NodeMovePlayerRequest
+	41, // 57: pb.NodeService.Attack:input_type -> pb.NodeAttackRequest
+	38, // 58: pb.NodeService.Heal:input_type -> pb.NodePlayerRequest
+	39, // 59: pb.NodeService.BuyItem:input_type -> pb.NodeBuyItemRequest
+	38, // 60: pb.NodeService.AttackBoss:input_type -> pb.NodePlayerRequest
+	43, // 61: pb.NodeService.Profile:input_type -> pb.NodeProfileRequest
+	45, // 62: pb.NodeService.RewardPlayer:input_type -> pb.NodeRewardPlayerRequest
+	46, // 63: pb.NodeService.Snapshot:input_type -> pb.NodeSnapshotRequest
+	48, // 64: pb.NodeService.Counts:input_type -> pb.NodeCountsRequest
+	50, // 65: pb.NodeService.Checkpoint:input_type -> pb.NodeCheckpointRequest
+	53, // 66: pb.NodeService.Promote:input_type -> pb.NodePromoteRequest
+	55, // 67: pb.NodeService.View:input_type -> pb.NodeViewRequest
+	22, // 68: pb.GatewayService.GameStream:output_type -> pb.ServerEnvelope
 	28, // 69: pb.AdminService.GetGatewayStatus:output_type -> pb.GatewayStatusResponse
-	32, // 70: pb.NodeServiceV2.Ping:output_type -> pb.NodePingResponse
-	34, // 71: pb.NodeServiceV2.AddPlayer:output_type -> pb.NodeAddPlayerResponse
-	36, // 72: pb.NodeServiceV2.RemovePlayer:output_type -> pb.NodeRemovePlayerResponse
-	40, // 73: pb.NodeServiceV2.MovePlayer:output_type -> pb.NodePlayerActionResponse
-	42, // 74: pb.NodeServiceV2.Attack:output_type -> pb.NodeAttackResponse
-	40, // 75: pb.NodeServiceV2.Heal:output_type -> pb.NodePlayerActionResponse
-	40, // 76: pb.NodeServiceV2.BuyItem:output_type -> pb.NodePlayerActionResponse
-	40, // 77: pb.NodeServiceV2.AttackBoss:output_type -> pb.NodePlayerActionResponse
-	44, // 78: pb.NodeServiceV2.Profile:output_type -> pb.NodeProfileResponse
-	44, // 79: pb.NodeServiceV2.RewardPlayer:output_type -> pb.NodeProfileResponse
-	47, // 80: pb.NodeServiceV2.Snapshot:output_type -> pb.NodeSnapshotResponse
-	49, // 81: pb.NodeServiceV2.Counts:output_type -> pb.NodeCountsResponse
-	51, // 82: pb.NodeServiceV2.Checkpoint:output_type -> pb.NodeCheckpointResponse
-	54, // 83: pb.NodeServiceV2.Promote:output_type -> pb.NodePromoteResponse
-	56, // 84: pb.NodeServiceV2.View:output_type -> pb.NodeViewResponse
+	32, // 70: pb.NodeService.Ping:output_type -> pb.NodePingResponse
+	34, // 71: pb.NodeService.AddPlayer:output_type -> pb.NodeAddPlayerResponse
+	36, // 72: pb.NodeService.RemovePlayer:output_type -> pb.NodeRemovePlayerResponse
+	40, // 73: pb.NodeService.MovePlayer:output_type -> pb.NodePlayerActionResponse
+	42, // 74: pb.NodeService.Attack:output_type -> pb.NodeAttackResponse
+	40, // 75: pb.NodeService.Heal:output_type -> pb.NodePlayerActionResponse
+	40, // 76: pb.NodeService.BuyItem:output_type -> pb.NodePlayerActionResponse
+	40, // 77: pb.NodeService.AttackBoss:output_type -> pb.NodePlayerActionResponse
+	44, // 78: pb.NodeService.Profile:output_type -> pb.NodeProfileResponse
+	44, // 79: pb.NodeService.RewardPlayer:output_type -> pb.NodeProfileResponse
+	47, // 80: pb.NodeService.Snapshot:output_type -> pb.NodeSnapshotResponse
+	49, // 81: pb.NodeService.Counts:output_type -> pb.NodeCountsResponse
+	51, // 82: pb.NodeService.Checkpoint:output_type -> pb.NodeCheckpointResponse
+	54, // 83: pb.NodeService.Promote:output_type -> pb.NodePromoteResponse
+	56, // 84: pb.NodeService.View:output_type -> pb.NodeViewResponse
 	68, // [68:85] is the sub-list for method output_type
 	51, // [51:68] is the sub-list for method input_type
 	51, // [51:51] is the sub-list for extension type_name

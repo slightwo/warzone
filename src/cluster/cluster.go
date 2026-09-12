@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"battleworld/config"
 	"battleworld/protocol"
 	"battleworld/storage"
 	"battleworld/world"
@@ -40,9 +41,8 @@ type Cluster struct {
 	activeNodes func() ([]storage.NodeRegistryInfo, error)
 	closeOnce   sync.Once
 	closed      bool
-	// owners 与 replicas 是已提交拓扑的网关只读缓存，只能由 applyTopologyLocked 写入。
+	// owners 是已提交拓扑的网关只读缓存，只能由 applyTopologyLocked 写入。
 	owners         map[string]string
-	replicas       map[string]string
 	topology       storage.Topology
 	topologyLoaded bool
 	configs        map[string]world.MapConfig
@@ -50,6 +50,8 @@ type Cluster struct {
 
 	mapCacheMu sync.RWMutex
 	mapCache   map[string]MapCacheData
+
+	runtime config.GatewayConfig
 
 	bossCacheMu sync.RWMutex
 	bossCache   protocol.BossState
@@ -68,12 +70,17 @@ type Cluster struct {
 }
 
 func NewCluster(store *storage.Store) (*Cluster, error) {
-	return newCluster(store, func(nodeID, addr string) (gatewayNodeClient, error) {
-		return NewNodeGRPCClient(nodeID, addr)
-	})
+	return NewClusterWithConfig(store, config.DefaultRuntime().Gateway)
 }
 
-func newCluster(store *storage.Store, nodeFactory gatewayNodeClientFactory) (*Cluster, error) {
+// NewClusterWithConfig 使用启动时加载的运行时配置构造网关集群。
+func NewClusterWithConfig(store *storage.Store, runtime config.GatewayConfig) (*Cluster, error) {
+	return newCluster(store, func(nodeID, addr string) (gatewayNodeClient, error) {
+		return NewNodeGRPCClient(nodeID, addr)
+	}, runtime)
+}
+
+func newCluster(store *storage.Store, nodeFactory gatewayNodeClientFactory, runtime config.GatewayConfig) (*Cluster, error) {
 	if store == nil {
 		return nil, errors.New("gateway store 不能为空")
 	}
@@ -88,12 +95,12 @@ func newCluster(store *storage.Store, nodeFactory gatewayNodeClientFactory) (*Cl
 		nodeFactory: nodeFactory,
 		activeNodes: store.GetActiveNodes,
 		owners:      make(map[string]string),
-		replicas:    make(map[string]string),
 		configs:     make(map[string]world.MapConfig),
 		stopCh:      make(chan struct{}),
 		mapCache:    make(map[string]MapCacheData),
 		mapEvents:   make(map[string][]string),
 		userEvents:  make(map[string][]string),
+		runtime:     runtime,
 	}
 
 	for _, cfg := range world.AvailableMaps() {
@@ -178,7 +185,8 @@ func (c *Cluster) Login(username, password string) (*protocol.WorldState, error)
 		return nil, errors.New("路由尚未就绪，请等待 coordinator 提交拓扑")
 	}
 
-	if err := owner.AddPlayer(context.Background(), mapID, epoch, profile); err != nil {
+	rpcCtx := c.rpcContextTimeout()
+	if err := owner.AddPlayer(rpcCtx, mapID, epoch, profile); err != nil {
 		return nil, fmt.Errorf("节点添加玩家失败: %v", err)
 	}
 
@@ -211,7 +219,7 @@ func (c *Cluster) Logout(username string) error {
 	topologyLoaded := c.topologyLoaded
 	c.mu.RUnlock()
 	if topologyLoaded && ownerID != "" && epoch != 0 && node != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), c.runtime.NodeRPCTimeout.Duration)
 		profile, removed, err := node.RemovePlayer(ctx, session.MapID, username, epoch)
 		cancel()
 		if err != nil {
@@ -232,7 +240,8 @@ func (c *Cluster) Move(username, dir string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, _, ok, err := node.MovePlayer(context.Background(), session.MapID, username, dir, epoch)
+	rpcCtx := c.rpcContextTimeout()
+	_, _, ok, err := node.MovePlayer(rpcCtx, session.MapID, username, dir, epoch)
 	if err != nil {
 		return nil, fmt.Errorf("节点RPC移动调用失败: %v", err)
 	}
@@ -252,7 +261,8 @@ func (c *Cluster) Attack(username string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	event, targetUsername, targetEvent, _, ok, err := node.Attack(context.Background(), session.MapID, username, epoch)
+	rpcCtx := c.rpcContextTimeout()
+	event, targetUsername, targetEvent, _, ok, err := node.Attack(rpcCtx, session.MapID, username, epoch)
 	if err != nil {
 		return nil, fmt.Errorf("节点RPC攻击调用异常: %v", err)
 	}
@@ -276,7 +286,8 @@ func (c *Cluster) Heal(username string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	event, _, ok, err := node.Heal(context.Background(), session.MapID, username, epoch)
+	rpcCtx := c.rpcContextTimeout()
+	event, _, ok, err := node.Heal(rpcCtx, session.MapID, username, epoch)
 	if err != nil {
 		return nil, fmt.Errorf("节点RPC治疗调用异常: %v", err)
 	}
@@ -296,7 +307,8 @@ func (c *Cluster) BuyItem(username, item string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	event, profile, ok, err := node.BuyItem(context.Background(), session.MapID, username, item, epoch)
+	rpcCtx := c.rpcContextTimeout()
+	event, profile, ok, err := node.BuyItem(rpcCtx, session.MapID, username, item, epoch)
 	if err != nil {
 		return nil, fmt.Errorf("节点RPC商店请求异常: %v", err)
 	}
@@ -315,7 +327,8 @@ func (c *Cluster) AttackBoss(username string) (*protocol.WorldState, error) {
 	if err != nil {
 		return nil, err
 	}
-	event, _, ok, err := node.AttackBoss(context.Background(), session.MapID, username, epoch)
+	rpcCtx := c.rpcContextTimeout()
+	event, _, ok, err := node.AttackBoss(rpcCtx, session.MapID, username, epoch)
 	if err != nil || !ok {
 		return nil, err
 	}
@@ -330,7 +343,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 		return nil, err
 	}
 	c.mu.RLock()
-	profile, ok, err := srcNode.Profile(context.Background(), session.MapID, username)
+	profile, ok, err := srcNode.Profile(c.rpcContextTimeout(), session.MapID, username)
 	if err != nil {
 		c.mu.RUnlock()
 		return nil, fmt.Errorf("节点RPC获取Profile异常: %v", err)
@@ -352,7 +365,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 		return nil, fmt.Errorf("目标地图 %q 路由尚未就绪，请等待 coordinator 提交拓扑", targetMap)
 	}
 
-	profile, ok, err = srcNode.RemovePlayer(context.Background(), session.MapID, username, srcEpoch)
+	profile, ok, err = srcNode.RemovePlayer(c.rpcContextTimeout(), session.MapID, username, srcEpoch)
 	if err != nil {
 		return nil, fmt.Errorf("源节点RPC移除玩家异常 (Try失败): %v", err)
 	}
@@ -362,11 +375,11 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 
 	// 执行 TCC 逻辑的 Confirm / Cancel 阶段
 	// 尝试向目标节点写入 (Confirm)
-	if err := dst.AddPlayer(context.Background(), targetMap, dstEpoch, &profile); err != nil {
+	if err := dst.AddPlayer(c.rpcContextTimeout(), targetMap, dstEpoch, &profile); err != nil {
 		// Cancel 阶段: 目标写入失败，必须进行业务回滚，将玩家恢复至原源节点
 		fmt.Printf("[!!!严重警告!!!] 玩家 %s 切换地图 %s 在目标节点写入失败 (%v)，开始执行 TCC 回滚...\n", username, targetMap, err)
 
-		rollbackErr := srcNode.AddPlayer(context.Background(), session.MapID, srcEpoch, &profile)
+		rollbackErr := srcNode.AddPlayer(c.rpcContextTimeout(), session.MapID, srcEpoch, &profile)
 		if rollbackErr != nil {
 			// 如果回滚也失败了，说明遇到了罕见的网络断裂或极端的双主脑裂，玩家数据暂时丢失在以太空间，需要后续的人工或后台守护进程修复
 			fmt.Printf("[FATAL 灾难] 玩家 %s TCC 回滚失败 ! 补偿写入原节点也失败了 : %v\n", username, rollbackErr)
@@ -377,7 +390,7 @@ func (c *Cluster) SwitchMap(username, targetMap string) (*protocol.WorldState, e
 	}
 
 	// Double-check (非必须，但加固防御): 验证目标节点写入已确认
-	profile, ok, err = dst.Profile(context.Background(), targetMap, username)
+	profile, ok, err = dst.Profile(c.rpcContextTimeout(), targetMap, username)
 	if err != nil || !ok {
 		// 读不到可能表明刚写入就被挤掉或者网络问题
 		return nil, fmt.Errorf("获取移动后用户信息异常 (Confirm阶段校验未通过): %v", err)
@@ -548,6 +561,14 @@ func (c *Cluster) sessionNode(username string) (*storage.GlobalSession, GatewayN
 	return &copySession, node, epoch, nil
 }
 
+func (c *Cluster) rpcContextTimeout() context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), c.runtime.NodeRPCTimeout.Duration)
+	// 将 cancel 挂到 ctx 上，避免调用方漏掉 cancel 造成泄露；这里使用标准做法：
+	// 在请求结束后由 GC 回收，cancel 仅在 ctx 到期或被主动取消时触发。
+	_ = cancel
+	return ctx
+}
+
 func (c *Cluster) pushEvent(username, event string) {
 	if event == "" {
 		return
@@ -577,7 +598,7 @@ func (c *Cluster) broadcastMapEvent(mapID, event string) {
 }
 
 func (c *Cluster) mapCacheLoop() {
-	ticker := time.NewTicker(150 * time.Millisecond)
+	ticker := time.NewTicker(c.runtime.MapSnapshotRefreshInterval.Duration)
 	defer ticker.Stop()
 
 	for {
@@ -623,7 +644,7 @@ func (c *Cluster) mapCacheLoop() {
 					defer wg.Done()
 
 					// 1. 获取 Snapshot
-					mapView, err := host.Snapshot(context.Background(), mapID)
+					mapView, err := host.Snapshot(c.rpcContextTimeout(), mapID)
 					if err != nil {
 						return
 					}

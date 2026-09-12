@@ -48,9 +48,9 @@ var (
 // It avoids exposing protobuf's package-private oneof interface outside pb.
 type clientCommand func(uint64) *pb.ClientEnvelope
 
-// gameClient owns the V2 game stream and its underlying connection.
+// gameClient owns the game stream and its underlying connection.
 type gameClient struct {
-	stream pb.GatewayService_GameStreamV2Client
+	stream pb.GatewayService_GameStreamClient
 	conn   *grpc.ClientConn
 }
 
@@ -286,12 +286,12 @@ func auth(addr, mode, username, password, confirm string) (*gameClient, *pb.Worl
 		return nil, nil, fmt.Errorf("连接网关失败：%w", err)
 	}
 
-	v2Stream, err := pb.NewGatewayServiceClient(conn).GameStreamV2(context.Background())
+	gameStream, err := pb.NewGatewayServiceClient(conn).GameStream(context.Background())
 	if err != nil {
 		_ = conn.Close()
-		return nil, nil, fmt.Errorf("打开 V2 游戏流失败：%w", err)
+		return nil, nil, fmt.Errorf("打开游戏流失败：%w", err)
 	}
-	stream := &gameClient{stream: v2Stream, conn: conn}
+	stream := &gameClient{stream: gameStream, conn: conn}
 
 	requestID := uint64(1)
 	if err := stream.Send(authRequest(requestID, mode, username, password, confirm)); err != nil {
@@ -596,8 +596,8 @@ func buildSideLines(state *pb.WorldState) []string {
 		if node.GetHealthy() {
 			status = colorGreen + "在线" + colorReset
 		}
-		lines = append(lines, fmt.Sprintf("• %-8s %s 主:%d 备:%d",
-			node.GetId(), status, len(node.GetPrimaryMaps()), len(node.GetReplicaMaps())))
+		lines = append(lines, fmt.Sprintf("• %-8s %s Owner:%d",
+			node.GetId(), status, len(node.GetPrimaryMaps())))
 	}
 	return lines
 }

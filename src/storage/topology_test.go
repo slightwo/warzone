@@ -40,14 +40,10 @@ func TestTopologyCloneAndValidate(t *testing.T) {
 
 	clone := topology.Clone()
 	topology.Owners["green"] = "node-c"
-	topology.Replicas["green"] = "node-d"
 	topology.MapEpochs["green"] = 2
 
 	if got := clone.Owners["green"]; got != "node-a" {
 		t.Fatalf("clone owner mutated through source: got %q", got)
-	}
-	if got := clone.Replicas["green"]; got != "node-b" {
-		t.Fatalf("clone replica mutated through source: got %q", got)
 	}
 	if got := clone.MapEpochs["green"]; got != 1 {
 		t.Fatalf("clone epoch mutated through source: got %d", got)
@@ -72,16 +68,6 @@ func TestTopologyValidateRejectsInvalidState(t *testing.T) {
 			name:     "unknown map",
 			topology: validTopology(),
 			known:    map[string]struct{}{"cave": {}},
-		},
-		{
-			name: "owner equals replica",
-			topology: Topology{
-				Version:   1,
-				Owners:    map[string]string{"green": "node-a"},
-				Replicas:  map[string]string{"green": "node-a"},
-				MapEpochs: map[string]uint64{"green": 1},
-				UpdatedAt: time.Now(),
-			},
 		},
 		{
 			name: "missing epoch",
@@ -111,12 +97,11 @@ func TestTopologyValidateRejectsInvalidState(t *testing.T) {
 	}
 }
 
-func TestTopologyAllowsUnassignedRoles(t *testing.T) {
+func TestTopologyAllowsUnassignedOwner(t *testing.T) {
 	topology := validTopology()
 	topology.Owners["green"] = ""
-	topology.Replicas["green"] = ""
 	if err := topology.Validate(map[string]struct{}{"green": {}}); err != nil {
-		t.Fatalf("topology with unassigned roles rejected: %v", err)
+		t.Fatalf("topology with unassigned owner rejected: %v", err)
 	}
 }
 
@@ -126,7 +111,7 @@ func TestTopologyNormalizeDoesNotAssignSubmissionTime(t *testing.T) {
 	if !topology.UpdatedAt.IsZero() {
 		t.Fatalf("normalize assigned updated_at: %v", topology.UpdatedAt)
 	}
-	if topology.Owners == nil || topology.Replicas == nil || topology.MapEpochs == nil {
+	if topology.Owners == nil || topology.MapEpochs == nil {
 		t.Fatal("normalize did not initialize topology maps")
 	}
 }
@@ -173,7 +158,6 @@ func TestTopologyStoreCompareAndSave(t *testing.T) {
 	next := loaded.Clone()
 	next.Version = 2
 	next.Owners["green"] = "node-b"
-	next.Replicas["green"] = "node-c"
 	next.MapEpochs["green"] = 2
 	next.UpdatedAt = time.Now().UTC()
 	if err := store.CompareAndSaveTopology(1, next); err != nil {
@@ -245,20 +229,22 @@ func TestLeaderTermFencesStaleCoordinatorTopologyCommit(t *testing.T) {
 	stale := initial.Clone()
 	stale.Version = 2
 	stale.LeaderTerm = 3
-	stale.Replicas["green"] = "node-c"
+	stale.Owners["green"] = "node-c"
+	stale.MapEpochs["green"] = 2
 	stale.UpdatedAt = time.Now().UTC()
 	if err := store.CompareAndSaveTopologyForLeader(1, stale, 3); !errors.Is(err, ErrLeaderTermInvariant) {
 		t.Fatalf("stale leader commit error = %v, want ErrLeaderTermInvariant", err)
 	}
 	loaded, found, err := store.LoadTopology()
-	if err != nil || !found || loaded.Version != 1 || loaded.LeaderTerm != 3 || loaded.Replicas["green"] != "node-b" {
+	if err != nil || !found || loaded.Version != 1 || loaded.LeaderTerm != 3 || loaded.Owners["green"] != "node-a" || loaded.MapEpochs["green"] != 1 {
 		t.Fatalf("stale leader modified topology: topology=%+v found=%t err=%v", loaded, found, err)
 	}
 
 	current := initial.Clone()
 	current.Version = 2
 	current.LeaderTerm = 4
-	current.Replicas["green"] = "node-c"
+	current.Owners["green"] = "node-c"
+	current.MapEpochs["green"] = 2
 	current.UpdatedAt = time.Now().UTC()
 	if err := store.CompareAndSaveTopologyForLeader(1, current, 4); err != nil {
 		t.Fatalf("current leader commit: %v", err)
@@ -294,7 +280,6 @@ func validTopology() Topology {
 		Version:    1,
 		LeaderTerm: 0,
 		Owners:     map[string]string{"green": "node-a"},
-		Replicas:   map[string]string{"green": "node-b"},
 		MapEpochs:  map[string]uint64{"green": 1},
 		UpdatedAt:  time.Date(2026, time.September, 7, 0, 0, 0, 0, time.UTC),
 	}

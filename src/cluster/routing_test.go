@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"battleworld/config"
 	"battleworld/pb"
 	"battleworld/protocol"
 	"battleworld/storage"
@@ -68,6 +69,7 @@ func TestReconcileGatewayNodesUsesCommittedOwnersOnly(t *testing.T) {
 		nodeAddrs:   make(map[string]string),
 		nodeTargets: make(map[string]string),
 		configs:     testMapConfigs("green"),
+		runtime:     config.DefaultRuntime().Gateway,
 		activeNodes: func() ([]storage.NodeRegistryInfo, error) {
 			return []storage.NodeRegistryInfo{
 				{ID: "node-a", Addr: "127.0.0.1:9311"},
@@ -82,7 +84,7 @@ func TestReconcileGatewayNodesUsesCommittedOwnersOnly(t *testing.T) {
 		},
 	}
 
-	first := testTopology(1, "node-a", "node-b")
+	first := testTopology(1, "node-a")
 	cluster.mu.Lock()
 	if _, err := cluster.applyTopologyLocked(first); err != nil {
 		cluster.mu.Unlock()
@@ -96,7 +98,7 @@ func TestReconcileGatewayNodesUsesCommittedOwnersOnly(t *testing.T) {
 		t.Fatalf("网关连接池未限定为 owner: %+v", cluster.nodes)
 	}
 
-	next := testTopology(2, "node-b", "node-a")
+	next := testTopology(2, "node-b")
 	cluster.mu.Lock()
 	if _, err := cluster.applyTopologyLocked(next); err != nil {
 		cluster.mu.Unlock()
@@ -126,15 +128,15 @@ func TestReconcileGatewayNodesUsesCommittedOwnersOnly(t *testing.T) {
 }
 
 func TestGatewayOwnerTargetsSkipsUnregisteredOwners(t *testing.T) {
-	topology := testTopology(1, "node-a", "node-b")
+	topology := testTopology(1, "node-a")
 	targets := gatewayOwnerTargets(topology, []storage.NodeRegistryInfo{{ID: "node-b", Addr: "127.0.0.1:9312"}})
 	if len(targets) != 0 {
-		t.Fatalf("未注册 owner 不应回退到 replica: %v", targets)
+		t.Fatalf("未注册 owner 不应回退到其它候选节点: %v", targets)
 	}
 }
 
 func TestGatewayOwnerTargetsSkipsDrainingOwner(t *testing.T) {
-	topology := testTopology(1, "node-a", "node-b")
+	topology := testTopology(1, "node-a")
 	targets := gatewayOwnerTargets(topology, []storage.NodeRegistryInfo{{
 		ID:       "node-a",
 		Addr:     "127.0.0.1:9311",
@@ -147,36 +149,36 @@ func TestGatewayOwnerTargetsSkipsDrainingOwner(t *testing.T) {
 
 const nodeClientTestBufferSize = 1024 * 1024
 
-type rejectingV2NodeServer struct {
-	pb.UnimplementedNodeServiceV2Server
+type rejectingNodeServer struct {
+	pb.UnimplementedNodeServiceServer
 	addPlayers atomic.Int32
 }
 
-func (*rejectingV2NodeServer) Ping(context.Context, *pb.NodePingRequest) (*pb.NodePingResponse, error) {
+func (*rejectingNodeServer) Ping(context.Context, *pb.NodePingRequest) (*pb.NodePingResponse, error) {
 	return nil, status.Error(codes.FailedPrecondition, "topology unavailable")
 }
 
-func (s *rejectingV2NodeServer) AddPlayer(context.Context, *pb.NodeAddPlayerRequest) (*pb.NodeAddPlayerResponse, error) {
+func (s *rejectingNodeServer) AddPlayer(context.Context, *pb.NodeAddPlayerRequest) (*pb.NodeAddPlayerResponse, error) {
 	s.addPlayers.Add(1)
 	return nil, status.Error(codes.FailedPrecondition, "topology unavailable")
 }
 
-func TestNodeGRPCClientPreservesV2SemanticError(t *testing.T) {
-	typed := &rejectingV2NodeServer{}
+func TestNodeGRPCClientPreservesSemanticError(t *testing.T) {
+	typed := &rejectingNodeServer{}
 	listener := startNodeClientTestServer(t, func(server *grpc.Server) {
-		pb.RegisterNodeServiceV2Server(server, typed)
+		pb.RegisterNodeServiceServer(server, typed)
 	})
 	client := newNodeClientForListener(t, listener)
 
 	err := client.Ping(context.Background())
 	if got := status.Code(err); got != codes.FailedPrecondition {
-		t.Fatalf("V2 语义错误 code = %s，want FailedPrecondition; err=%v", got, err)
+		t.Fatalf("语义错误 code = %s，want FailedPrecondition; err=%v", got, err)
 	}
 	if err := client.AddPlayer(context.Background(), "green", 1, &protocol.UserProfile{Username: "hero"}); status.Code(err) != codes.FailedPrecondition {
-		t.Fatalf("V2 写语义错误 code = %s，want FailedPrecondition; err=%v", status.Code(err), err)
+		t.Fatalf("写语义错误 code = %s，want FailedPrecondition; err=%v", status.Code(err), err)
 	}
 	if got := typed.addPlayers.Load(); got != 1 {
-		t.Fatalf("V2 AddPlayer 调用次数 = %d，want 1", got)
+		t.Fatalf("AddPlayer 调用次数 = %d，want 1", got)
 	}
 }
 
@@ -205,8 +207,8 @@ func newNodeClientForListener(t *testing.T, listener *bufconn.Listener) *NodeGRP
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return &NodeGRPCClient{
-		v2:   pb.NewNodeServiceV2Client(conn),
-		conn: conn,
-		id:   "node-a",
+		client: pb.NewNodeServiceClient(conn),
+		conn:   conn,
+		id:     "node-a",
 	}
 }

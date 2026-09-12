@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"battleworld/config"
 	"battleworld/storage"
 
 	"github.com/redis/go-redis/v9"
@@ -38,14 +39,15 @@ func (o RedisOptions) normalized() (RedisOptions, error) {
 	if o.TermKey == "" {
 		o.TermKey = DefaultTermKey
 	}
+	defaults := config.DefaultRuntime().LeaderElection
 	if o.TTL == 0 {
-		o.TTL = 3 * time.Second
+		o.TTL = defaults.LeaseTTL.Duration
 	}
 	if o.RenewInterval == 0 {
-		o.RenewInterval = time.Second
+		o.RenewInterval = defaults.RenewInterval.Duration
 	}
 	if o.RetryInterval == 0 {
-		o.RetryInterval = 200 * time.Millisecond
+		o.RetryInterval = defaults.CampaignRetryInterval.Duration
 	}
 	if o.TTL <= 0 || o.RenewInterval <= 0 || o.RetryInterval <= 0 {
 		return RedisOptions{}, errors.New("redis election durations must be positive")

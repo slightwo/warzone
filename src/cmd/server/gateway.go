@@ -17,10 +17,10 @@ import (
 	gatewaywire "battleworld/transport/gateway"
 )
 
-const v2ControlQueueCapacity = 32
+const controlQueueCapacity = 32
 
-type v2Sender struct {
-	stream pb.GatewayService_GameStreamV2Server
+type streamSender struct {
+	stream pb.GatewayService_GameStreamServer
 
 	controls   chan *pb.ServerEnvelope
 	stateReady chan struct{}
@@ -37,21 +37,21 @@ type v2Sender struct {
 
 	stateMu        sync.Mutex
 	pendingState   *pb.WorldState
-	latestState    v2StateVersion
+	latestState    stateVersion
 	hasLatestState bool
 }
 
-type v2StateVersion struct {
+type stateVersion struct {
 	mapID          string
 	sessionVersion int64
 	mapEpoch       uint64
 	mapVersion     int64
 }
 
-func newV2Sender(stream pb.GatewayService_GameStreamV2Server) *v2Sender {
-	return &v2Sender{
+func newStreamSender(stream pb.GatewayService_GameStreamServer) *streamSender {
+	return &streamSender{
 		stream:            stream,
-		controls:          make(chan *pb.ServerEnvelope, v2ControlQueueCapacity),
+		controls:          make(chan *pb.ServerEnvelope, controlQueueCapacity),
 		stateReady:        make(chan struct{}, 1),
 		finished:          make(chan struct{}),
 		done:              make(chan struct{}),
@@ -60,7 +60,7 @@ func newV2Sender(stream pb.GatewayService_GameStreamV2Server) *v2Sender {
 	}
 }
 
-func (s *v2Sender) Start() {
+func (s *streamSender) Start() {
 	s.startOnce.Do(func() {
 		go s.writeLoop()
 	})
@@ -68,7 +68,7 @@ func (s *v2Sender) Start() {
 
 // EnqueueControl applies backpressure instead of discarding authentication results,
 // command results, or errors. It returns false only once the stream is shutting down.
-func (s *v2Sender) EnqueueControl(envelope *pb.ServerEnvelope) bool {
+func (s *streamSender) EnqueueControl(envelope *pb.ServerEnvelope) bool {
 	if envelope == nil {
 		return true
 	}
@@ -90,7 +90,7 @@ func (s *v2Sender) EnqueueControl(envelope *pb.ServerEnvelope) bool {
 
 // SubmitState copies a pooled domain WorldState into the protobuf boundary before
 // returning the domain object to its pool. Only the newest non-regressing state is kept.
-func (s *v2Sender) SubmitState(state *protocol.WorldState) {
+func (s *streamSender) SubmitState(state *protocol.WorldState) {
 	if state == nil {
 		return
 	}
@@ -108,7 +108,7 @@ func (s *v2Sender) SubmitState(state *protocol.WorldState) {
 	default:
 	}
 
-	version := v2StateVersion{
+	version := stateVersion{
 		mapID:          protobufState.GetMap().GetId(),
 		sessionVersion: protobufState.GetSessionVersion(),
 		mapEpoch:       protobufState.GetMapEpoch(),
@@ -116,7 +116,7 @@ func (s *v2Sender) SubmitState(state *protocol.WorldState) {
 	}
 
 	s.stateMu.Lock()
-	if s.hasLatestState && v2StateRegresses(version, s.latestState) {
+	if s.hasLatestState && stateRegresses(version, s.latestState) {
 		s.stateMu.Unlock()
 		return
 	}
@@ -131,10 +131,10 @@ func (s *v2Sender) SubmitState(state *protocol.WorldState) {
 	}
 }
 
-// v2StateRegresses follows the client-side application contract: topology version is
+// stateRegresses follows the client-side application contract: topology version is
 // routing observability rather than an ordering key; a new session or map epoch is
 // authoritative, while within the same session/epoch map versions must not decrease.
-func v2StateRegresses(next, previous v2StateVersion) bool {
+func stateRegresses(next, previous stateVersion) bool {
 	if next.sessionVersion < previous.sessionVersion {
 		return true
 	}
@@ -150,7 +150,7 @@ func v2StateRegresses(next, previous v2StateVersion) bool {
 	return next.mapVersion < previous.mapVersion
 }
 
-func (s *v2Sender) takeState() *pb.WorldState {
+func (s *streamSender) takeState() *pb.WorldState {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	state := s.pendingState
@@ -160,7 +160,7 @@ func (s *v2Sender) takeState() *pb.WorldState {
 
 // Finish stops accepting new messages and drains already accepted control messages.
 // It intentionally discards any pending mergeable state snapshot.
-func (s *v2Sender) Finish() {
+func (s *streamSender) Finish() {
 	s.finishOnce.Do(func() {
 		s.controlMu.Lock()
 		s.acceptingControls = false
@@ -179,25 +179,25 @@ func (s *v2Sender) Finish() {
 
 // Abort stops the writer immediately, for example after the transport reports Send
 // failure. Producers observe Done and stop without blocking.
-func (s *v2Sender) Abort() {
+func (s *streamSender) Abort() {
 	s.abortOnce.Do(func() {
 		close(s.done)
 	})
 }
 
-func (s *v2Sender) Done() <-chan struct{} {
+func (s *streamSender) Done() <-chan struct{} {
 	return s.done
 }
 
-func (s *v2Sender) Finished() <-chan struct{} {
+func (s *streamSender) Finished() <-chan struct{} {
 	return s.finished
 }
 
-func (s *v2Sender) Wait() {
+func (s *streamSender) Wait() {
 	<-s.writerDone
 }
 
-func (s *v2Sender) writeLoop() {
+func (s *streamSender) writeLoop() {
 	defer close(s.writerDone)
 	for {
 		// Give reliable control messages priority over mergeable state frames.
@@ -242,7 +242,7 @@ func (s *v2Sender) writeLoop() {
 	}
 }
 
-func (s *v2Sender) drainControls() {
+func (s *streamSender) drainControls() {
 	for {
 		select {
 		case <-s.done:
@@ -257,7 +257,7 @@ func (s *v2Sender) drainControls() {
 	}
 }
 
-func (s *v2Sender) send(envelope *pb.ServerEnvelope) bool {
+func (s *streamSender) send(envelope *pb.ServerEnvelope) bool {
 	if err := s.stream.Send(envelope); err != nil {
 		s.Abort()
 		return false
@@ -265,23 +265,23 @@ func (s *v2Sender) send(envelope *pb.ServerEnvelope) bool {
 	return true
 }
 
-func (s *GatewayServer) GameStreamV2(stream pb.GatewayService_GameStreamV2Server) error {
+func (s *GatewayServer) GameStream(stream pb.GatewayService_GameStreamServer) error {
 	first, err := stream.Recv()
 	if err != nil {
 		return err
 	}
 	if first.GetRequestId() == 0 {
-		return sendInitialV2Error(stream, 0, pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, "request_id 必须为非零值", false)
+		return sendInitialError(stream, 0, pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, "request_id 必须为非零值", false)
 	}
 
-	username, initialState, err := s.authenticateV2(first)
+	username, initialState, err := s.authenticateStream(first)
 	if err != nil {
-		response := gatewayV2Error(first.GetRequestId(), err, v2AuthError)
+		response := gatewayError(first.GetRequestId(), err, authError)
 		_ = stream.Send(response)
 		return err
 	}
 	if initialState == nil {
-		return sendInitialV2Error(stream, first.GetRequestId(), pb.ErrorCode_ERROR_CODE_INTERNAL, "认证成功但未返回世界状态", true)
+		return sendInitialError(stream, first.GetRequestId(), pb.ErrorCode_ERROR_CODE_INTERNAL, "认证成功但未返回世界状态", true)
 	}
 
 	initialStatePB := gatewaywire.ToWorldState(initialState)
@@ -296,10 +296,10 @@ func (s *GatewayServer) GameStreamV2(stream pb.GatewayService_GameStreamV2Server
 		return err
 	}
 
-	sender := newV2Sender(stream)
+	sender := newStreamSender(stream)
 	sender.Start()
 	statePumpDone := make(chan struct{})
-	go s.pumpV2States(sender, username, statePumpDone)
+	go s.pumpStates(sender, username, statePumpDone)
 
 	var logoutOnce sync.Once
 	logout := func() error {
@@ -316,8 +316,8 @@ func (s *GatewayServer) GameStreamV2(stream pb.GatewayService_GameStreamV2Server
 		sender.Wait()
 	}()
 
-	inbound := make(chan v2Inbound)
-	go receiveV2Inbound(stream, sender, inbound)
+	inbound := make(chan streamInbound)
+	go receiveInbound(stream, sender, inbound)
 
 	for {
 		select {
@@ -336,7 +336,7 @@ func (s *GatewayServer) GameStreamV2(stream pb.GatewayService_GameStreamV2Server
 				}
 				return incoming.err
 			}
-			if shouldClose, ok := s.handleV2Command(sender, username, logout, incoming.request); !ok {
+			if shouldClose, ok := s.handleCommand(sender, username, logout, incoming.request); !ok {
 				return nil
 			} else if shouldClose {
 				sender.Finish()
@@ -348,17 +348,17 @@ func (s *GatewayServer) GameStreamV2(stream pb.GatewayService_GameStreamV2Server
 	}
 }
 
-type v2Inbound struct {
+type streamInbound struct {
 	request *pb.ClientEnvelope
 	err     error
 }
 
-func receiveV2Inbound(stream pb.GatewayService_GameStreamV2Server, sender *v2Sender, inbound chan<- v2Inbound) {
+func receiveInbound(stream pb.GatewayService_GameStreamServer, sender *streamSender, inbound chan<- streamInbound) {
 	defer close(inbound)
 	for {
 		request, err := stream.Recv()
 		select {
-		case inbound <- v2Inbound{request: request, err: err}:
+		case inbound <- streamInbound{request: request, err: err}:
 		case <-sender.Done():
 			return
 		case <-sender.Finished():
@@ -370,7 +370,7 @@ func receiveV2Inbound(stream pb.GatewayService_GameStreamV2Server, sender *v2Sen
 	}
 }
 
-func (s *GatewayServer) authenticateV2(request *pb.ClientEnvelope) (string, *protocol.WorldState, error) {
+func (s *GatewayServer) authenticateStream(request *pb.ClientEnvelope) (string, *protocol.WorldState, error) {
 	switch payload := request.GetPayload().(type) {
 	case *pb.ClientEnvelope_Login:
 		if payload.Login == nil {
@@ -398,13 +398,13 @@ func (s *GatewayServer) authenticateV2(request *pb.ClientEnvelope) (string, *pro
 	}
 }
 
-func (s *GatewayServer) handleV2Command(sender *v2Sender, username string, logout func() error, request *pb.ClientEnvelope) (shouldClose bool, enqueued bool) {
+func (s *GatewayServer) handleCommand(sender *streamSender, username string, logout func() error, request *pb.ClientEnvelope) (shouldClose bool, enqueued bool) {
 	requestID := uint64(0)
 	if request != nil {
 		requestID = request.GetRequestId()
 	}
 	if request == nil || requestID == 0 {
-		return false, sender.EnqueueControl(v2ErrorEnvelope(requestID, pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, "request_id 必须为非零值", false))
+		return false, sender.EnqueueControl(errorEnvelope(requestID, pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, "request_id 必须为非零值", false))
 	}
 
 	var (
@@ -418,7 +418,7 @@ func (s *GatewayServer) handleV2Command(sender *v2Sender, username string, logou
 			err = errors.New("移动请求不能为空")
 			break
 		}
-		direction, directionErr := v2Direction(payload.Move.GetDirection())
+		direction, directionErr := parseDirection(payload.Move.GetDirection())
 		if directionErr != nil {
 			err = directionErr
 			break
@@ -481,7 +481,7 @@ func (s *GatewayServer) handleV2Command(sender *v2Sender, username string, logou
 		if next != nil {
 			protocol.FreeWorldState(next)
 		}
-		return false, sender.EnqueueControl(gatewayV2Error(request.GetRequestId(), err, v2CommandError))
+		return false, sender.EnqueueControl(gatewayError(request.GetRequestId(), err, commandError))
 	}
 	if !sender.EnqueueControl(&pb.ServerEnvelope{
 		RequestId: request.GetRequestId(),
@@ -500,7 +500,7 @@ func (s *GatewayServer) handleV2Command(sender *v2Sender, username string, logou
 	return shouldClose, true
 }
 
-func (s *GatewayServer) pumpV2States(sender *v2Sender, username string, done chan<- struct{}) {
+func (s *GatewayServer) pumpStates(sender *streamSender, username string, done chan<- struct{}) {
 	defer close(done)
 	ticker := time.NewTicker(s.gameStreamStateInterval())
 	defer ticker.Stop()
@@ -523,35 +523,35 @@ func (s *GatewayServer) pumpV2States(sender *v2Sender, username string, done cha
 				continue
 			}
 			lastError = err.Error()
-			if !sender.EnqueueControl(gatewayV2Error(0, err, v2StateError)) {
+			if !sender.EnqueueControl(gatewayError(0, err, stateError)) {
 				return
 			}
 		}
 	}
 }
 
-type v2ErrorKind uint8
+type errorKind uint8
 
 const (
-	v2AuthError v2ErrorKind = iota
-	v2CommandError
-	v2StateError
+	authError errorKind = iota
+	commandError
+	stateError
 )
 
-func sendInitialV2Error(stream pb.GatewayService_GameStreamV2Server, requestID uint64, code pb.ErrorCode, message string, retryable bool) error {
-	err := stream.Send(v2ErrorEnvelope(requestID, code, message, retryable))
+func sendInitialError(stream pb.GatewayService_GameStreamServer, requestID uint64, code pb.ErrorCode, message string, retryable bool) error {
+	err := stream.Send(errorEnvelope(requestID, code, message, retryable))
 	if err != nil {
 		return err
 	}
 	return errors.New(message)
 }
 
-func gatewayV2Error(requestID uint64, err error, kind v2ErrorKind) *pb.ServerEnvelope {
-	code, retryable := mapV2Error(err, kind)
-	return v2ErrorEnvelope(requestID, code, err.Error(), retryable)
+func gatewayError(requestID uint64, err error, kind errorKind) *pb.ServerEnvelope {
+	code, retryable := mapError(err, kind)
+	return errorEnvelope(requestID, code, err.Error(), retryable)
 }
 
-func v2ErrorEnvelope(requestID uint64, code pb.ErrorCode, message string, retryable bool) *pb.ServerEnvelope {
+func errorEnvelope(requestID uint64, code pb.ErrorCode, message string, retryable bool) *pb.ServerEnvelope {
 	return &pb.ServerEnvelope{
 		RequestId: requestID,
 		Payload: &pb.ServerEnvelope_Error{Error: &pb.ErrorResponse{
@@ -562,7 +562,7 @@ func v2ErrorEnvelope(requestID uint64, code pb.ErrorCode, message string, retrya
 	}
 }
 
-func mapV2Error(err error, kind v2ErrorKind) (pb.ErrorCode, bool) {
+func mapError(err error, kind errorKind) (pb.ErrorCode, bool) {
 	if err == nil {
 		return pb.ErrorCode_ERROR_CODE_INTERNAL, true
 	}
@@ -584,7 +584,7 @@ func mapV2Error(err error, kind v2ErrorKind) (pb.ErrorCode, bool) {
 	case containsAny(message, "code = InvalidArgument"):
 		return pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, false
 	}
-	if kind == v2AuthError {
+	if kind == authError {
 		switch {
 		case containsAny(message, "不能为空", "不一致", "请求不能为空", "首条消息"):
 			return pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, false
@@ -598,10 +598,10 @@ func mapV2Error(err error, kind v2ErrorKind) (pb.ErrorCode, bool) {
 	if containsAny(message, "authority denied", "stale topology", "当前 epoch", "epoch") {
 		return pb.ErrorCode_ERROR_CODE_STALE_ROUTE, true
 	}
-	if kind == v2StateError {
+	if kind == stateError {
 		return pb.ErrorCode_ERROR_CODE_ROUTE_NOT_READY, true
 	}
-	if kind == v2CommandError {
+	if kind == commandError {
 		if containsAny(message, "不能为空", "不允许", "缺少可识别", "无效") {
 			return pb.ErrorCode_ERROR_CODE_INVALID_REQUEST, false
 		}
@@ -619,7 +619,7 @@ func containsAny(message string, fragments ...string) bool {
 	return false
 }
 
-func v2Direction(direction pb.Direction) (string, error) {
+func parseDirection(direction pb.Direction) (string, error) {
 	switch direction {
 	case pb.Direction_DIRECTION_UP:
 		return protocol.DirUp, nil
