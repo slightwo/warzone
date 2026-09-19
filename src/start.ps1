@@ -32,7 +32,7 @@ if (-not $NoBuild) {
 
 # ---------- 2. 启动网关（独立窗口） ----------
 Write-Host ">>> 启动网关 (127.0.0.1:9310)..." -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot'; `$env:BW_DB_PASSWORD='$DbPassword'; go run ./cmd/server"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot'; `$env:BW_DB_PASSWORD='$DbPassword'; go run ./cmd/gateway"
 
 # ---------- 3. 启动六个物理节点（每张地图一主一备候选，各独立窗口） ----------
 Start-Sleep -Seconds 1

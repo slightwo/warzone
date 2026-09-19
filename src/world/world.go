@@ -72,27 +72,6 @@ type World struct {
 	nextTreasure int
 }
 
-func AvailableMaps() []MapConfig {
-	return []MapConfig{
-		buildGreenMap(),
-		buildCaveMap(),
-		buildRuinsMap(),
-	}
-}
-
-func DefaultMapID() string {
-	return "green"
-}
-
-func FindConfig(id string) (MapConfig, bool) {
-	for _, cfg := range AvailableMaps() {
-		if cfg.ID == id {
-			return cfg, true
-		}
-	}
-	return MapConfig{}, false
-}
-
 func NewWorld(cfg MapConfig) *World {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(cfg.ID))
@@ -150,11 +129,6 @@ func (w *World) AddOrRestorePlayer(profile *protocol.UserProfile) protocol.Playe
 	}
 	w.players[player.Username] = player
 	w.version++
-	// fmt.Println("成功添加角色到", w.cfg.ID)
-	// fmt.Println("以下是当前地图所有角色")
-	// for i := range w.players {
-	// 	fmt.Println(i)
-	// }
 	return w.playerViewLocked(player)
 }
 
@@ -381,10 +355,7 @@ func (w *World) Sl2_WithinRange(username string) bool {
 	if !ok {
 		return false
 	}
-	if distance(w.cfg.BossX, w.cfg.BossY, player.X, player.Y) > protocol.BossAtkRange {
-		return false
-	}
-	return true
+	return distance(w.cfg.BossX, w.cfg.BossY, player.X, player.Y) <= protocol.BossAtkRange
 }
 
 func (w *World) Sl2_GetDamadge(username string) int {
@@ -396,83 +367,6 @@ func (w *World) Sl2_GetDamadge(username string) int {
 		return 0
 	}
 	return player.Attack
-
-}
-func (w *World) BackgroundStep() []string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	events := make([]string, 0, 6)
-
-	for _, player := range w.players {
-		wasAlive := player.Alive
-		w.refreshPlayerStateLocked(player)
-		if !wasAlive && player.Alive {
-			events = append(events, fmt.Sprintf("%s 已在营地复活", player.Username))
-		}
-	}
-
-	for len(w.npcs) < protocol.MinNPCs {
-		if npc := w.spawnNPCLocked(); npc != nil {
-			events = append(events, fmt.Sprintf("%s 刷新了 %s，位置 (%d,%d)", w.cfg.Name, npc.Name, npc.X, npc.Y))
-		} else {
-			break
-		}
-	}
-	if len(w.treasures) < protocol.MaxTreasures && w.rng.Intn(100) < 45 {
-		if treasure := w.spawnTreasureLocked("野外宝箱"); treasure != nil {
-			events = append(events, fmt.Sprintf("%s 刷新了宝物，位置 (%d,%d)", w.cfg.Name, treasure.X, treasure.Y))
-		}
-	}
-
-	ids := make([]string, 0, len(w.npcs))
-	for id := range w.npcs {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-
-	for _, id := range ids {
-		npc := w.npcs[id]
-		if npc == nil || !npc.Alive {
-			continue
-		}
-		target := w.closestPlayerLocked(npc.X, npc.Y, 1)
-		if target != nil {
-			target.HP -= npc.Attack
-			target.LastUpdate = time.Now()
-			if target.HP <= 0 {
-				w.knockDownPlayerLocked(target)
-				events = append(events, fmt.Sprintf("%s 被 %s 击倒了", target.Username, npc.Name))
-			} else {
-				events = append(events, fmt.Sprintf("%s 对 %s 造成了 %d 点伤害", npc.Name, target.Username, npc.Attack))
-			}
-			w.version++
-			continue
-		}
-
-		base := w.rng.Intn(4)
-		for step := 0; step < 4; step++ {
-			nx, ny := npc.X, npc.Y
-			switch (base + step) % 4 {
-			case 0:
-				ny--
-			case 1:
-				ny++
-			case 2:
-				nx--
-			default:
-				nx++
-			}
-			if w.walkableForLocked(nx, ny, "") {
-				npc.X = nx
-				npc.Y = ny
-				w.version++
-				break
-			}
-		}
-	}
-
-	return events
 }
 
 func (w *World) Snapshot(nodeID string) protocol.MapView {
@@ -533,125 +427,6 @@ func (w *World) Counts() (players, npcs, treasures int, version int64) {
 	return len(w.players), len(w.npcs), len(w.treasures), w.version
 }
 
-func (w *World) CaptureCheckpoint(nodeID string) protocol.MapCheckpoint {
-	snapshot := w.Snapshot(nodeID)
-	return protocol.MapCheckpoint{
-		MapID:      snapshot.ID,
-		NodeID:     snapshot.NodeID,
-		Version:    snapshot.Version,
-		Terrain:    snapshot.Terrain,
-		Players:    snapshot.Players,
-		NPCs:       snapshot.NPCs,
-		Treasures:  snapshot.Treasures,
-		Checkpoint: time.Now(),
-	}
-}
-
-func (w *World) RestoreCheckpoint(cp protocol.MapCheckpoint) {
-	if cp.MapID != w.cfg.ID || cp.Version == 0 {
-		return
-	}
-
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	if len(cp.Terrain) > 0 {
-		w.terrain = stringsToGrid(cp.Terrain)
-	}
-	w.players = make(map[string]*Player)
-	for _, view := range cp.Players {
-		w.players[view.Username] = &Player{
-			Username:   view.Username,
-			MapID:      w.cfg.ID,
-			X:          view.X,
-			Y:          view.Y,
-			HP:         view.HP,
-			MaxHP:      view.MaxHP,
-			Attack:     view.Attack,
-			Potions:    valueOr(view.Potions, protocol.MaxPotions),
-			Treasures:  view.Treasures,
-			Kills:      view.Kills,
-			Deaths:     view.Deaths,
-			Victories:  view.Victories,
-			Alive:      view.Alive,
-			LastUpdate: time.Now(),
-		}
-	}
-	w.npcs = make(map[string]*NPC)
-	for _, view := range cp.NPCs {
-		w.npcs[view.ID] = &NPC{
-			ID:     view.ID,
-			Name:   view.Name,
-			X:      view.X,
-			Y:      view.Y,
-			HP:     view.HP,
-			MaxHP:  view.MaxHP,
-			Attack: view.Attack,
-			Alive:  view.Alive,
-		}
-	}
-	w.treasures = make(map[string]*Treasure)
-	for _, view := range cp.Treasures {
-		w.treasures[view.ID] = &Treasure{
-			ID:    view.ID,
-			Kind:  view.Kind,
-			X:     view.X,
-			Y:     view.Y,
-			Value: view.Value,
-		}
-	}
-	w.version = cp.Version
-	w.nextNPC = len(w.npcs) + 1
-	w.nextTreasure = len(w.treasures) + 1
-}
-
-func (w *World) bootstrap() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	for len(w.npcs) < protocol.MinNPCs {
-		w.spawnNPCLocked()
-	}
-	for len(w.treasures) < protocol.MaxTreasures/2 {
-		w.spawnTreasureLocked("遗迹补给")
-	}
-}
-
-func (w *World) respawnPlayer(username string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	player, ok := w.players[username]
-	if !ok {
-		return
-	}
-	if player.Alive {
-		return
-	}
-	player.X, player.Y = w.findSafePositionLocked(w.cfg.SpawnX, w.cfg.SpawnY, username)
-	player.HP = player.MaxHP
-	player.Potions = protocol.MaxPotions
-	player.Alive = true
-	player.RespawnAt = time.Time{}
-	player.LastUpdate = time.Now()
-	w.version++
-}
-
-func (w *World) RewardPlayer(username string, treasureDelta, victoryDelta int) (protocol.UserProfile, bool) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	player, ok := w.players[username]
-	if !ok {
-		return protocol.UserProfile{}, false
-	}
-	player.Treasures += treasureDelta
-	player.Victories += victoryDelta
-	player.LastUpdate = time.Now()
-	w.version++
-	return w.profileLocked(player), true
-}
-
 func (w *World) playerViewLocked(player *Player) protocol.PlayerView {
 	return protocol.PlayerView{
 		Username:   player.Username,
@@ -688,74 +463,6 @@ func (w *World) profileLocked(player *Player) protocol.UserProfile {
 		Victories: player.Victories,
 		Alive:     player.Alive,
 	}
-}
-
-func (w *World) closestPlayerLocked(x, y, radius int) *Player {
-	var best *Player
-	for _, player := range w.players {
-		w.refreshPlayerStateLocked(player)
-		if !player.Alive || distance(x, y, player.X, player.Y) > radius {
-			continue
-		}
-		if best == nil || player.HP < best.HP || (player.HP == best.HP && player.Username < best.Username) {
-			best = player
-		}
-	}
-	return best
-}
-
-func (w *World) spawnNPCLocked() *NPC {
-	x, y, ok := w.bestSpawnCellLocked("", true)
-	if !ok {
-		return nil
-	}
-	names := []string{"史莱姆", "荒原狼", "流寇", "宝匣怪", "石像魔", "潜行兽"}
-	id := fmt.Sprintf("%s-npc-%d", w.cfg.ID, w.nextNPC)
-	npc := &NPC{
-		ID:     id,
-		Name:   names[w.nextNPC%len(names)],
-		X:      x,
-		Y:      y,
-		HP:     70 + w.rng.Intn(30),
-		MaxHP:  90,
-		Attack: protocol.NPCDamage,
-		Alive:  true,
-	}
-	w.nextNPC++
-	w.npcs[id] = npc
-	w.version++
-	return npc
-}
-
-func (w *World) spawnTreasureLocked(kind string) *Treasure {
-	x, y, ok := w.bestSpawnCellLocked("", false)
-	if !ok {
-		return nil
-	}
-	return w.dropTreasureLocked(x, y, 1+w.rng.Intn(4), kind)
-}
-
-func (w *World) dropTreasureLocked(x, y, value int, kind string) *Treasure {
-	if x < 0 || y < 0 || y >= len(w.terrain) || x >= len(w.terrain[y]) {
-		return nil
-	}
-	if _, treasure, ok := w.treasureAtLocked(x, y); ok {
-		treasure.Value += value
-		w.version++
-		return treasure
-	}
-	id := fmt.Sprintf("%s-t-%d", w.cfg.ID, w.nextTreasure)
-	w.nextTreasure++
-	treasure := &Treasure{
-		ID:    id,
-		Kind:  kind,
-		X:     x,
-		Y:     y,
-		Value: value,
-	}
-	w.treasures[id] = treasure
-	w.version++
-	return treasure
 }
 
 func (w *World) treasureAtLocked(x, y int) (string, *Treasure, bool) {
@@ -887,57 +594,6 @@ func (w *World) spawnScoreLocked(x, y int, preferNPC bool) int {
 	return score
 }
 
-func (w *World) knockDownPlayerLocked(player *Player) {
-	player.HP = 0
-	player.Alive = false
-	player.Deaths++
-	player.RespawnAt = time.Now().Add(4 * time.Second)
-	player.LastUpdate = time.Now()
-}
-
-func (w *World) refreshPlayerStateLocked(player *Player) {
-	if player == nil || player.Alive || player.RespawnAt.IsZero() {
-		return
-	}
-	if time.Now().Before(player.RespawnAt) {
-		return
-	}
-	player.X, player.Y = w.findSafePositionLocked(w.cfg.SpawnX, w.cfg.SpawnY, player.Username)
-	player.HP = player.MaxHP
-	player.Potions = max(player.Potions, protocol.MaxPotions)
-	player.Alive = true
-	player.RespawnAt = time.Time{}
-	player.LastUpdate = time.Now()
-	w.version++
-}
-
-func (w *World) playerRespawnInLocked(player *Player) int {
-	if player == nil || player.Alive || player.RespawnAt.IsZero() {
-		return 0
-	}
-	remain := int(time.Until(player.RespawnAt).Seconds())
-	if remain < 1 {
-		return 1
-	}
-	return remain
-}
-
-func stringsToGrid(rows []string) [][]rune {
-	grid := make([][]rune, len(rows))
-	for i, row := range rows {
-		grid[i] = []rune(row)
-	}
-	return grid
-}
-
-func gridToStrings(grid [][]rune) []string {
-	rows := make([]string, len(grid))
-	for i, row := range grid {
-		rows[i] = string(row)
-	}
-	return rows
-}
-
 func valueOr(v, fallback int) int {
 	if v == 0 {
 		return fallback
@@ -947,151 +603,4 @@ func valueOr(v, fallback int) int {
 
 func distance(ax, ay, bx, by int) int {
 	return int(math.Abs(float64(ax-bx)) + math.Abs(float64(ay-by)))
-}
-
-func blankGrid() [][]rune {
-	grid := make([][]rune, protocol.MapHeight)
-	for y := range grid {
-		grid[y] = make([]rune, protocol.MapWidth)
-		for x := range grid[y] {
-			grid[y][x] = '.'
-		}
-	}
-	return grid
-}
-
-func drawBorder(grid [][]rune) {
-	for x := 0; x < len(grid[0]); x++ {
-		grid[0][x] = '#'
-		grid[len(grid)-1][x] = '#'
-	}
-	for y := 0; y < len(grid); y++ {
-		grid[y][0] = '#'
-		grid[y][len(grid[y])-1] = '#'
-	}
-}
-
-func fillRect(grid [][]rune, x, y, width, height int) {
-	for yy := y; yy < y+height && yy < len(grid); yy++ {
-		for xx := x; xx < x+width && xx < len(grid[yy]); xx++ {
-			grid[yy][xx] = '#'
-		}
-	}
-}
-
-func drawH(grid [][]rune, y, fromX, toX int) {
-	if y < 0 || y >= len(grid) {
-		return
-	}
-	for x := max(0, fromX); x <= toX && x < len(grid[y]); x++ {
-		grid[y][x] = '#'
-	}
-}
-
-func drawV(grid [][]rune, x, fromY, toY int) {
-	for y := max(0, fromY); y <= toY && y < len(grid); y++ {
-		if x >= 0 && x < len(grid[y]) {
-			grid[y][x] = '#'
-		}
-	}
-}
-
-func carve(grid [][]rune, x, y int) {
-	if y >= 0 && y < len(grid) && x >= 0 && x < len(grid[y]) {
-		grid[y][x] = '.'
-	}
-}
-
-func buildGreenMap() MapConfig {
-	grid := blankGrid()
-	drawBorder(grid)
-	fillRect(grid, 8, 3, 14, 5)
-	fillRect(grid, 33, 14, 14, 4)
-	drawV(grid, 26, 1, 21)
-	drawV(grid, 45, 2, 13)
-	drawH(grid, 9, 1, 20)
-	drawH(grid, 7, 30, 54)
-	carve(grid, 26, 5)
-	carve(grid, 26, 12)
-	carve(grid, 26, 18)
-	carve(grid, 45, 5)
-	carve(grid, 45, 10)
-	carve(grid, 6, 9)
-	carve(grid, 12, 9)
-	carve(grid, 18, 9)
-	carve(grid, 37, 7)
-	carve(grid, 44, 7)
-	carve(grid, 50, 7)
-	return MapConfig{
-		ID:     "green",
-		Name:   "青岚要塞",
-		Layout: gridToStrings(grid),
-		SpawnX: 4,
-		SpawnY: 4,
-		BossX:  50,
-		BossY:  20,
-	}
-}
-
-func buildCaveMap() MapConfig {
-	grid := blankGrid()
-	drawBorder(grid)
-	fillRect(grid, 5, 5, 10, 9)
-	fillRect(grid, 36, 12, 12, 7)
-	drawV(grid, 28, 1, 22)
-	drawH(grid, 4, 18, 51)
-	drawH(grid, 18, 2, 25)
-	drawV(grid, 18, 10, 20)
-	carve(grid, 28, 4)
-	carve(grid, 28, 11)
-	carve(grid, 28, 18)
-	carve(grid, 22, 4)
-	carve(grid, 34, 4)
-	carve(grid, 45, 4)
-	carve(grid, 9, 18)
-	carve(grid, 14, 18)
-	carve(grid, 18, 15)
-	return MapConfig{
-		ID:     "cave",
-		Name:   "玄矿地窟",
-		Layout: gridToStrings(grid),
-		SpawnX: 4,
-		SpawnY: 20,
-		BossX:  49,
-		BossY:  20,
-	}
-}
-
-func buildRuinsMap() MapConfig {
-	grid := blankGrid()
-	drawBorder(grid)
-	drawV(grid, 12, 2, 20)
-	drawV(grid, 24, 1, 18)
-	drawV(grid, 37, 5, 22)
-	drawH(grid, 6, 2, 22)
-	drawH(grid, 13, 15, 40)
-	fillRect(grid, 42, 3, 8, 5)
-	fillRect(grid, 6, 15, 8, 4)
-	carve(grid, 12, 5)
-	carve(grid, 12, 11)
-	carve(grid, 12, 17)
-	carve(grid, 24, 4)
-	carve(grid, 24, 10)
-	carve(grid, 24, 16)
-	carve(grid, 37, 9)
-	carve(grid, 37, 17)
-	carve(grid, 8, 6)
-	carve(grid, 18, 6)
-	carve(grid, 19, 13)
-	carve(grid, 29, 13)
-	carve(grid, 44, 13)
-	return MapConfig{
-		ID:     "ruins",
-		Name:   "残星遗迹",
-		Layout: gridToStrings(grid),
-		SpawnX: 50,
-		SpawnY: 4,
-		BossX:  50,
-		BossY:  20,
-	}
 }

@@ -19,7 +19,7 @@ cd "$SCRIPT_DIR/../.." || exit 1
 
 echo "==================================="
 echo "编译游戏服务端..."
-go build -o cmd/benchmark/server_bin cmd/server/main.go
+go build -o cmd/benchmark/server_bin ./cmd/gateway
 
 echo "启动游戏服务端..."
 ./cmd/benchmark/server_bin > cmd/benchmark/server.log 2>&1 &

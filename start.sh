@@ -113,7 +113,7 @@ cd "$SRC_DIR"
 # 创建拓扑，Gateway 最后消费已提交拓扑并建立数据面路由。
 start_nodes
 start_service coordinator go run ./cmd/coordinator -lifecycle-addr 127.0.0.1:9421
-start_service gateway go run ./cmd/server -lifecycle-addr 127.0.0.1:9422
+start_service gateway go run ./cmd/gateway -lifecycle-addr 127.0.0.1:9422
 
 echo
 echo "全部启动完成。日志目录: $LOG_DIR"
