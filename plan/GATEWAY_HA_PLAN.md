@@ -39,7 +39,7 @@ Coordinator：选主、节点健康、Topology、Node 故障转移
 
 ### 1. Gateway 多副本与真实 readiness
 
-1. 为 `cmd/server` 增加：
+1. 为 `cmd/gateway` 增加：
    - `-addr`：本实例 gRPC 监听地址；
    - `-id`：Gateway 实例标识。
 2. 保留 `protocol.GatewayAddr` 作为客户端默认入口或本地开发默认值；多个 Gateway 使用不同的后端端口，例如 `9317`、`9318`。
